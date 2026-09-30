@@ -1,0 +1,20 @@
+name: Native source checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: swift test --package-path macos
+      - run: node --test macos/Tests/adaptive.test.mjs macos/Tests/privacy-boundary.test.mjs
+      - run: python3 -B -m unittest discover -s macos/Tests -p test_context_config.py
+      - run: python3 -B -m unittest discover -s macos/Tests -p test_thread_settings.py
+      - run: python3 -B -m unittest discover -s macos/Tests -p test_installer.py

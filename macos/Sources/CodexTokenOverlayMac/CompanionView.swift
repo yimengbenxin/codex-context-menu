@@ -1,0 +1,411 @@
+import AppKit
+import SwiftUI
+import Charts
+import CodexTokenCore
+
+struct CompanionView: View {
+    @ObservedObject var model: ContextSettingsModel
+    @ObservedObject var usage: UsageModel
+    let chooseProject: () -> Void
+    let identify: () -> Void
+    let locateLink: () -> Void
+    let close: () -> Void
+    @AppStorage("contextUI.appearance") private var appearance = "system"
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 26) {
+                Label("Codex 上下文", systemImage: "square.stack.3d.up")
+                    .font(.system(size: 15, weight: .semibold))
+                    .padding(.top, 14)
+                VStack(spacing: 5) {
+                    ForEach(CompanionPage.allCases) { page in
+                        Button { model.page = page } label: {
+                            Label(page.rawValue, systemImage: page.symbol)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .background(model.page == page ? Color.accentColor.opacity(0.14) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(model.page == page ? Color.accentColor : Color.primary)
+                        .accessibilityAddTraits(model.page == page ? .isSelected : [])
+                    }
+                }
+                Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("外观", selection: $appearance) {
+                        Text("跟随系统").tag("system")
+                        Text("浅色").tag("light")
+                        Text("深色").tag("dark")
+                    }
+                    .pickerStyle(.menu).controlSize(.small)
+                    .padding(.bottom, 8)
+                    Text("本地伴随工具").font(.caption).foregroundStyle(.secondary)
+                    Text("版本 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(20).frame(width: 178).background(.regularMaterial)
+            Divider()
+            Group {
+                if model.page == .context {
+                    ContextSettingsView(model: model, chooseProject: chooseProject, identify: identify, locateLink: locateLink, close: close)
+                } else {
+                    UsageOverviewView(model: usage)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .preferredColorScheme(appearance == "light" ? .light : (appearance == "dark" ? .dark : nil))
+    }
+}
+
+struct ContextSettingsView: View {
+    @ObservedObject var model: ContextSettingsModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let chooseProject: () -> Void
+    let identify: () -> Void
+    let locateLink: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("上下文设置").font(.system(size: 26, weight: .semibold))
+                        Text("选择策略，让上下文跟上你的任务。").foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Button(action: identify) { Label("识别当前对话", systemImage: "scope") }
+                                .buttonStyle(.borderedProminent)
+                            Button("手动选择项目…", action: chooseProject)
+                            if model.identifying { ProgressView().controlSize(.small) }
+                        }
+                        HStack {
+                            TextField("粘贴 codex://threads/… 深度链接", text: $model.targetLink)
+                                .textFieldStyle(.roundedBorder).accessibilityLabel("目标对话深度链接")
+                            Button("定位链接", action: locateLink).disabled(model.targetLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                    .disabled(model.loading || model.saving || model.identifying)
+                    if model.project == nil {
+                        ContentUnavailableView {
+                            Label("先定位要修改的对话", systemImage: "bubble.left")
+                        } description: {
+                            Text("点击识别，或粘贴深度链接。无需向对话发送指令。")
+                        } actions: {
+                            Button("识别当前对话", action: identify).controlSize(.large)
+                        }
+                        .frame(minHeight: 250)
+                    } else {
+                        projectHeader
+                        if model.loading {
+                            HStack(spacing: 10) { ProgressView().controlSize(.small); Text("正在读取项目设置…") }
+                                .frame(maxWidth: .infinity, minHeight: 240)
+                        } else if let status = model.status {
+                            strategy(status)
+                            activation(status)
+                            DisclosureGroup("生效规则与范围") {
+                                VStack(alignment: .leading, spacing: 9) {
+                                    Text(model.scope == .thread ? "仅影响锁定的对话 ID；同项目其他对话与新分支不变。" : "影响此项目下所有未设置个人覆盖的对话。")
+                                    Text("不修改模型、压缩强度、全局配置或聊天记录。")
+                                    Text("官方模型上限及保留比例仍然适用，输入值不等于最终可用窗口。")
+                                    Text("其他客户端订阅或无法完整保留的权限策略可能延后加载。")
+                                    if let threadID = model.threadID { Text("已核对对话：\(threadID)").textSelection(.enabled) }
+                                }
+                                .font(.callout).foregroundStyle(.secondary).padding(.top, 10)
+                            }
+                            .font(.callout)
+                        }
+                    }
+                }
+                .padding(30).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 13) {
+                if let error = model.error {
+                    HStack {
+                        InlineMessage(text: error, symbol: "exclamationmark.triangle", color: .red)
+                        if model.project != nil {
+                            Button(model.targetVerificationFailed ? "使用上次定位" : "重新读取") { model.reload() }
+                                .disabled(model.saving || model.loading || model.identifying)
+                        }
+                    }
+                }
+                if let feedback = model.feedback, !model.dirty { InlineMessage(text: feedback, symbol: "checkmark.circle", color: .green) }
+                HStack {
+                    Text(model.saving ? "正在保存设置…" : (model.loading ? "正在读取设置…" : (model.dirty ? "更改尚未保存" : "没有待保存的更改")))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    if model.saving { ProgressView().controlSize(.small) }
+                    Button("关闭", action: close).keyboardShortcut(.cancelAction).disabled(model.saving)
+                    Button("保存设置") { model.save() }
+                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        .disabled(!model.canSave)
+                }
+            }
+            .padding(.horizontal, 30).padding(.vertical, 18)
+        }
+    }
+
+    private var projectHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(model.targetVerificationFailed ? "上次定位（本次识别未成功）" : (model.threadID == nil ? "上次选择的项目" : "已锁定对话 · \(String(model.threadID!.prefix(8)))"))
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                if model.threadID != nil {
+                    Picker("修改范围", selection: Binding(get: { model.scope }, set: { model.selectScope($0) })) {
+                        ForEach(ContextScope.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.menu).fixedSize().disabled(model.saving || model.loading || model.identifying)
+                }
+            }
+            if model.threadID != nil {
+                Text("定位来源：\(model.targetOrigin.rawValue)").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "folder").font(.system(size: 24)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(URL(fileURLWithPath: model.project ?? "").lastPathComponent)
+                        .font(.system(size: 17, weight: .semibold))
+                    Text(model.project ?? "").font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(2).textSelection(.enabled).help(model.project ?? "")
+                }
+            }
+            Text(model.scope == .thread ? "对话级设置：不会修改此项目下的其他对话。" : "项目级设置：影响此项目下未单独覆盖的全部对话。")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+        }
+    }
+
+    private func strategy(_ status: ProjectContextStatus) -> some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text("上下文策略").font(.system(size: 15, weight: .semibold))
+            Picker("上下文策略", selection: $model.mode) {
+                ForEach(ContextMode.allCases) { mode in
+                    Text(mode.title).tag(mode).disabled(mode == .adaptive && !status.adaptive_available)
+                }
+            }
+            .pickerStyle(.segmented).labelsHidden().disabled(model.saving)
+            VStack(alignment: .leading, spacing: 13) {
+                Label(detailTitle, systemImage: model.mode.symbol).font(.system(size: 16, weight: .semibold))
+                Text(detailDescription).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if model.mode == .custom {
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        TextField("例如 485", text: $model.input)
+                            .font(.system(size: 20, weight: .medium).monospacedDigit())
+                            .textFieldStyle(.roundedBorder).frame(width: 170)
+                            .accessibilityLabel("自定义上下文，单位 K tokens").disabled(model.saving)
+                        Text("K tokens").foregroundStyle(.secondary)
+                    }
+                    if let validation = model.validation { InlineMessage(text: validation, symbol: "exclamationmark.circle", color: .red) }
+                    else { Text(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "留空保存，将清除当前范围的覆盖并继承默认。" : "1 K = 1,000 tokens。最终窗口以运行反馈为准。")
+                        .font(.caption).foregroundStyle(.secondary) }
+                } else if model.mode == .adaptive {
+                    HStack(spacing: 9) {
+                        Text("官方初始档")
+                        Image(systemName: "arrow.right")
+                        Text("中间档")
+                        Image(systemName: "arrow.right")
+                        Text("官方上限")
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(18)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.mode)
+            if !status.trusted { InlineMessage(text: "此项目尚未受信任。请先在 Codex 中打开并信任，然后重新选择。", symbol: "lock", color: .orange) }
+            if !status.adaptive_available { InlineMessage(text: model.scope == .thread ? "对话级组件需升级或重新验证，当前不能保存；项目级默认与自定义仍可使用。" : "热加载组件未验证或需升级；项目级默认与自定义仍可保存，重启后生效。", symbol: "info.circle", color: .secondary) }
+            if !status.inherited.isEmpty {
+                InlineMessage(text: "项目、上级或全局仍有上下文覆盖；恢复默认会继承它们。", symbol: "info.circle", color: .orange)
+            }
+        }
+    }
+
+    private func activation(_ status: ProjectContextStatus) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label(status.adaptive_available ? "支持下一轮生效" : (model.scope == .thread ? "对话级组件不可用" : "重启后生效"), systemImage: "clock")
+                .font(.subheadline.weight(.medium))
+            Text(ContextActivationCopy.initial + "\n" + ContextActivationCopy.nextTurn)
+                .font(.caption).foregroundStyle(.secondary)
+            if let window = model.observedWindow {
+                HStack { Text("最近运行窗口"); Spacer(); Text("\(window.formatted()) tokens").monospacedDigit() }
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let target = model.observedTarget {
+                HStack { Text("最近软预算"); Spacer(); Text("\(target.formatted()) tokens").monospacedDigit() }
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var detailTitle: String {
+        switch model.mode { case .default: return "由 Codex 决定"; case .adaptive: return "随任务逐级扩展"; case .custom: return "指定你需要的预算" }
+    }
+    private var detailDescription: String {
+        switch model.mode {
+        case .default: return model.scope == .thread ? "清除本对话的覆盖，继承项目、上级与官方默认。不固定任何上下文数值。" : "移除项目覆盖，跟随官方模型与已有上级设置。不固定任何上下文数值。"
+        case .adaptive: return "自动压缩成功后，依据保留比例决定是否升档；新档位在下一轮加载。手动压缩或失败不升档。"
+        case .custom: return "输入整数 K。留空恢复默认，不修改官方压缩模型或推理强度。"
+        }
+    }
+}
+
+struct InlineMessage: View {
+    let text: String
+    let symbol: String
+    let color: Color
+    var body: some View {
+        Label { Text(text).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: symbol).foregroundStyle(color) }
+            .font(.caption).foregroundStyle(.primary).accessibilityElement(children: .combine)
+    }
+}
+
+struct UsageOverviewView: View {
+    @ObservedObject var model: UsageModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 25) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("用量概览").font(.system(size: 26, weight: .semibold))
+                        Text("官方额度与本机 Token 记录，分开看清楚。").foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { model.refreshCost() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("刷新本地统计").accessibilityLabel("刷新本地统计").disabled(model.costBusy)
+                }
+                localUsage
+                Divider()
+                quota
+                Divider()
+                DisclosureGroup("数据来源与隐私") {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("复用 MIT 开源 CodexBar 0.69.0。本地统计只读 Codex 会话日志，并在禁止网络的子进程中运行。")
+                        Text("额度查询使用现有 Codex 登录凭据访问官方 OpenAI 用量接口，不读取浏览器 Cookie，不向社区作者上传聊天或凭据。")
+                        Text("本机 Token 记录不等于账号扣费、订阅额度或所有设备的用量。缺失日志和未完成扫描会导致统计不完整。")
+                    }
+                    .font(.caption).foregroundStyle(.secondary).padding(.top, 10)
+                }
+            }
+            .padding(30).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear { if model.cost == nil { model.refreshCost() } }
+    }
+
+    private var localUsage: some View {
+        VStack(alignment: .leading, spacing: 17) {
+            HStack {
+                Text("本机每日 Token").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                if model.costBusy { ProgressView().controlSize(.small) }
+                Text("每分钟更新").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 30) {
+                statistic("今日已记录", value: model.today?.totalTokens)
+                statistic("近七天已记录", value: model.cost?.totals?.totalTokens)
+            }
+            if let days = model.cost?.daily, !days.isEmpty {
+                Chart(days.sorted { $0.date < $1.date }) { day in
+                    if let tokens = day.totalTokens {
+                        BarMark(x: .value("日期", String(day.date.suffix(5))), y: .value("Token", tokens))
+                            .foregroundStyle(Color.accentColor).cornerRadius(4)
+                            .accessibilityLabel("\(day.date)，\(tokens.formatted()) tokens")
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let tokens = value.as(Double.self) {
+                                Text(tokens.formatted(.number.notation(.compactName).locale(Locale(identifier: "zh_CN"))))
+                            }
+                        }
+                    }
+                }
+                .frame(height: 130)
+                HStack(spacing: 18) {
+                    Text("今日输入 \(tokenString(model.today?.inputTokens))")
+                    Text("输出 \(tokenString(model.today?.outputTokens))")
+                    Text("缓存命中 \(tokenString(model.today?.cacheReadTokens))")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            } else if !model.costBusy { Text("尚无可展示的本地记录。未知值不会显示成零。")
+                .font(.callout).foregroundStyle(.secondary) }
+            if model.cost?.historyCoverageIsEstablished != true {
+                InlineMessage(text: "统计未完整覆盖所选日期，仅展示已读取的记录；后续扫描会继续补齐。", symbol: "info.circle", color: .orange)
+            }
+            if let error = model.costError { InlineMessage(text: "统计更新失败，旧数据可能已过时：\(error)", symbol: "exclamationmark.triangle", color: .red) }
+            if let date = model.cost?.updatedAt { Text("统计快照：\(displayDate(date)) · 本机日志，不是账单")
+                .font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+
+    private var quota: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("官方账号额度").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                if model.quotaBusy { ProgressView().controlSize(.small) }
+                Button(model.quota == nil ? "读取额度" : "刷新额度") { model.refreshQuota() }.disabled(model.quotaBusy)
+            }
+            if let usage = model.quota?.usage {
+                HStack {
+                    Text(usage.loginMethod ?? "Codex 已登录账号")
+                    Spacer()
+                    if let account = usage.redactedAccount { Text(account) }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                if let window = usage.primary { quotaWindow(window, fallback: "主额度窗口") }
+                if let window = usage.secondary { quotaWindow(window, fallback: "第二额度窗口") }
+                if let window = usage.tertiary { quotaWindow(window, fallback: "其他额度窗口") }
+                if usage.primary == nil { Text("官方未返回主窗口额度，不推算剩余百分比。")
+                    .font(.caption).foregroundStyle(.secondary) }
+                if let date = usage.updatedAt { Text("官方数据：\(displayDate(date))").font(.caption).foregroundStyle(.secondary) }
+            } else {
+                Text("点击读取，向官方 OpenAI 接口查询。此操作不运行模型、不消耗对话 Token。")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if let error = model.quotaError { InlineMessage(text: "额度更新失败，旧快照不代表当前额度：\(error)", symbol: "exclamationmark.triangle", color: .red) }
+            Toggle("自动刷新官方额度（每 5 分钟）", isOn: $model.automaticQuota)
+                .font(.callout).onChange(of: model.automaticQuota) { _, enabled in if enabled { model.refreshQuota() } }
+        }
+    }
+
+    private func quotaWindow(_ window: CodexQuotaReport.Window, fallback: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(window.windowMinutes.map { $0 >= 1440 && $0 % 1440 == 0 ? "\($0 / 1440) 天窗口" : "\($0) 分钟窗口" } ?? fallback)
+                Spacer()
+                Text(window.remainingPercent.map { "剩余 \($0.formatted(.number.precision(.fractionLength(0...1))))%" } ?? "剩余额度未知").monospacedDigit()
+            }
+            .font(.callout)
+            if let remaining = window.remainingPercent { ProgressView(value: remaining, total: 100).tint(remaining < 15 ? .orange : .accentColor) }
+            if let date = window.resetsAt { Text("重置：\(displayDate(date))").font(.caption).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func statistic(_ label: String, value: Int64?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(tokenString(value)).font(.system(size: 25, weight: .semibold).monospacedDigit()).textSelection(.enabled)
+        }
+    }
+    private func tokenString(_ value: Int64?) -> String { value.map { $0.formatted() } ?? "待统计" }
+    private func displayDate(_ value: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { return value }
+        let display = DateFormatter()
+        display.locale = Locale(identifier: "zh_CN")
+        display.dateFormat = "M月d日 HH:mm"
+        return display.string(from: date)
+    }
+}

@@ -1,0 +1,13 @@
+#!/bin/zsh
+set -eu
+root="${0:A:h}"
+node="/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+export CODEX_CONTEXT_PYTHON="${CODEX_CONTEXT_PYTHON:-$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3}"
+case "${1:-}" in
+  --context-capability|--enable-integration|--restore-integration|--restore-official)
+    exec "$node" "$root/integration.mjs" "$@" ;;
+esac
+if [[ -f "$HOME/Library/Application Support/CodexContextTool/official-adaptive-runtime.json" ]] && ! "$node" "$root/integration.mjs" --validated; then
+  exec /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex "$@"
+fi
+exec "$node" "$root/boundary.mjs" "$@"

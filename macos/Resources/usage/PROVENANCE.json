@@ -1,0 +1,12 @@
+{
+  "project": "https://github.com/steipete/CodexBar",
+  "version": "0.69.0",
+  "license": "MIT",
+  "archive": "https://github.com/steipete/CodexBar/releases/download/v0.69.0/CodexBarCLI-v0.69.0-macos-arm64.tar.gz",
+  "archiveSha256": "96f281fb60ea4577bb7316d0d5b1dc1a2d0cf2063dcc4b046fa492e93a50737b",
+  "binarySha256": "f1a047175bb1d3a4eb9abb7fd236442e26a7188323b8610a8b86d16a4cad342a",
+  "sourcesReviewed": ["docs/cli.md", "docs/codex.md", "Sources/CodexBarCore/UsageFetcher.swift", "Sources/CodexBarCore/CostUsageFetcher.swift"],
+  "localScan": "Network denied; Codex native history only; seven local calendar dates",
+  "quota": "Explicit OAuth source; official OpenAI endpoints; no browser cookie fallback",
+  "automaticQuotaDefault": false
+}
