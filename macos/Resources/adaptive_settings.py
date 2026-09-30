@@ -1,12 +1,15 @@
 import json
 import uuid
+from pathlib import Path
+
+DEFAULTS = json.loads((Path(__file__).parent / "adaptive/defaults.json").read_text())
 
 
 def options(raw=None):
     value = json.loads(raw) if isinstance(raw, str) else raw or {}
     if not isinstance(value, dict):
         raise ValueError("自适应参数格式无效。")
-    lower, upper = value.get("lower_percent", 45), value.get("upper_percent", 65)
+    lower, upper = (value.get(key, DEFAULTS[key]) for key in ("lower_percent", "upper_percent"))
     if type(lower) not in (int, float) or type(upper) not in (int, float) or not 0 <= lower < upper <= 100:
         raise ValueError("阈值需满足 0 ≤ 两次阈值 < 一次阈值 ≤ 100。")
     tiers = value.get("tiers", [None, None, None])
@@ -22,8 +25,12 @@ def options(raw=None):
 
 def from_project(document):
     table = document.get("codex_context_tool", {})
-    return options({"lower_percent": table.get("lower_percent", 45), "upper_percent": table.get("upper_percent", 65),
+    return options({**{key: table[key] for key in ("lower_percent", "upper_percent") if key in table},
         "tiers": [table.get(name) for name in ("initial_tokens", "middle_tokens", "maximum_tokens")]})
+
+
+def overrides(raw):
+    return {key: value for key, value in options(raw).items() if value != DEFAULTS[key]}
 
 
 def write_project(document, initial, raw):
@@ -32,7 +39,11 @@ def write_project(document, initial, raw):
     if table is None:
         document["codex_context_tool"] = {}
         table = document["codex_context_tool"]
-    table["lower_percent"], table["upper_percent"] = selected["lower_percent"], selected["upper_percent"]
+    for key in ("lower_percent", "upper_percent"):
+        if selected[key] == DEFAULTS[key]:
+            table.pop(key, None)
+        else:
+            table[key] = selected[key]
     for name, amount in zip(("initial_tokens", "middle_tokens", "maximum_tokens"), selected["tiers"]):
         if amount is None:
             table.pop(name, None)

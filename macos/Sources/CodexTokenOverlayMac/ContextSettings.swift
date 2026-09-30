@@ -4,6 +4,12 @@ import SwiftUI
 import CodexTokenCore
 
 struct ProjectContextStatus: Decodable, Sendable {
+    struct Preview: Decodable, Sendable {
+        let model: String
+        let tiers: [Int64]
+        let maximum: Int64
+        let display_tiers: [Int64]?
+    }
     struct Inherited: Decodable, Sendable {
         let path: String
         let values: [String: Int64]
@@ -17,6 +23,9 @@ struct ProjectContextStatus: Decodable, Sendable {
     let adaptive_available: Bool
     let adaptive_reason: String?
     let adaptive_options: AdaptiveOptions?
+    let adaptive_defaults: AdaptiveOptions?
+    let adaptive_preview: Preview?
+    let adaptive_preview_reason: String?
     let trusted: Bool
     let inherited: [Inherited]
     let scope: String?
@@ -39,7 +48,7 @@ enum ContextBackend {
     static func run(_ arguments: [String]) throws -> ProjectContextStatus {
         let python = try python()
         guard let script = Bundle.main.path(forResource: "context_config", ofType: "py") else { throw FocusedContextTarget.failure("应用资源不完整，请重新下载。") }
-        let data = try LocalCommand.run(python, ["-B", script] + arguments)
+        let data = try LocalCommand.run(python, ["-B", script] + arguments + ["--preview"])
         return try JSONDecoder().decode(ProjectContextStatus.self, from: data)
     }
 }

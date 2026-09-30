@@ -1,13 +1,15 @@
 import Foundation
 
 struct AdaptiveOptions: Codable, Equatable, Sendable {
-    var lower_percent: Double = 45
-    var upper_percent: Double = 65
+    var lower_percent: Double
+    var upper_percent: Double
     var tiers: [Int64?] = [nil, nil, nil]
 
-    static func parse(lower: String, upper: String, tiers: [String]) throws -> AdaptiveOptions {
-        guard let low = Double(lower.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let high = Double(upper.trimmingCharacters(in: .whitespacesAndNewlines)),
+    static func parse(lower: String, upper: String, tiers: [String], defaults: AdaptiveOptions) throws -> AdaptiveOptions {
+        let lowerText = lower.trimmingCharacters(in: .whitespacesAndNewlines)
+        let upperText = upper.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let low = lowerText.isEmpty ? defaults.lower_percent : Double(lowerText),
+              let high = upperText.isEmpty ? defaults.upper_percent : Double(upperText),
               low.isFinite, high.isFinite, low >= 0, low < high, high <= 100 else {
             throw FocusedContextTarget.failure("阈值需满足 0 ≤ 两次阈值 < 一次阈值 ≤ 100。")
         }

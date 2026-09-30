@@ -41,8 +41,8 @@ final class ContextSettingsModel: ObservableObject {
     @Published var status: ProjectContextStatus?
     @Published var mode: ContextMode = .default
     @Published var input = ""
-    @Published var lowerThreshold = "45"
-    @Published var upperThreshold = "65"
+    @Published var lowerThreshold = ""
+    @Published var upperThreshold = ""
     @Published var tierInputs = ["", "", ""]
     @Published var repairingRuntime = false
     @Published var runtimeReason: String?
@@ -64,10 +64,23 @@ final class ContextSettingsModel: ObservableObject {
     private var generation = UUID()
     private var savedMode: ContextMode = .default
     private var savedInput = ""
-    private var savedAdaptive = AdaptiveOptions()
+    private var savedAdaptive: AdaptiveOptions?
 
     func adaptiveOptions() throws -> AdaptiveOptions {
-        try AdaptiveOptions.parse(lower: lowerThreshold, upper: upperThreshold, tiers: tierInputs)
+        guard let defaults = status?.adaptive_defaults else { throw FocusedContextTarget.failure("默认参数尚未读取，请重新读取设置。") }
+        return try AdaptiveOptions.parse(lower: lowerThreshold, upper: upperThreshold, tiers: tierInputs, defaults: defaults)
+    }
+
+    func thresholdPlaceholder(_ lower: Bool) -> String {
+        guard let defaults = status?.adaptive_defaults else { return "读取中…" }
+        return (lower ? defaults.lower_percent : defaults.upper_percent).formatted(.number)
+    }
+
+    func tierPlaceholder(_ index: Int) -> String {
+        guard let preview = status?.adaptive_preview else { return "未读取官方值" }
+        let values = preview.display_tiers ?? (preview.tiers.count == 3 ? preview.tiers : [])
+        guard values.indices.contains(index) else { return "未读取官方值" }
+        return (Double(values[index]) / 1000).formatted(.number.grouping(.never))
     }
 
     var validation: String? {
@@ -91,7 +104,7 @@ final class ContextSettingsModel: ObservableObject {
             && (scope != .thread || (threadID != nil && status?.adaptive_available == true))
     }
 
-    func load(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64?, scope: ContextScope? = nil, origin: ContextTargetOrigin? = nil, title: String? = nil) {
+    func load(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64?, scope: ContextScope? = nil, origin: ContextTargetOrigin? = nil, title: String? = nil, selectedMode: ContextMode? = nil) {
         guard !saving else { return }
         let request = UUID()
         generation = request
@@ -114,6 +127,7 @@ final class ContextSettingsModel: ObservableObject {
                 let result = try await Task.detached(priority: .userInitiated) { try ContextBackend.run(arguments) }.value
                 guard generation == request else { return }
                 adopt(result)
+                if let selectedMode { mode = selectedMode }
                 integrationPending = false
                 UserDefaults.standard.set(result.root, forKey: "contextSettings.lastProject")
             } catch {
@@ -147,10 +161,10 @@ final class ContextSettingsModel: ObservableObject {
         input = result.window.map { String($0 / 1000) } ?? ""
         savedMode = mode
         savedInput = input
-        savedAdaptive = result.adaptive_options ?? AdaptiveOptions()
-        lowerThreshold = String(savedAdaptive.lower_percent)
-        upperThreshold = String(savedAdaptive.upper_percent)
-        tierInputs = savedAdaptive.tiers.map { $0.map { String($0 / 1000) } ?? "" }
+        savedAdaptive = result.adaptive_options ?? result.adaptive_defaults
+        lowerThreshold = savedAdaptive?.lower_percent == result.adaptive_defaults?.lower_percent ? "" : savedAdaptive.map { String($0.lower_percent) } ?? ""
+        upperThreshold = savedAdaptive?.upper_percent == result.adaptive_defaults?.upper_percent ? "" : savedAdaptive.map { String($0.upper_percent) } ?? ""
+        tierInputs = savedAdaptive?.tiers.map { $0.map { String($0 / 1000) } ?? "" } ?? ["", "", ""]
         runtimeReason = result.adaptive_available ? nil : result.adaptive_reason ?? "运行组件未完成接入。"
     }
 

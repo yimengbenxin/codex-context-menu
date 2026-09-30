@@ -19,6 +19,17 @@ enum FocusedContextTarget {
     }
 
     @MainActor
+    static func resolve(requestPermission: Bool = false) async throws -> (ContextTarget.Located, String) {
+        guard let focus = try capture(requestPermission: requestPermission) else {
+            throw failure("需要辅助功能权限才能读取焦点窗口标题。请在系统设置中授权一次，或粘贴目标对话的深度链接；不会按后台活动猜测目标。")
+        }
+        let title = focus.title
+        let target = try await Task.detached(priority: .userInitiated) { try ContextTarget.locate(focusedTitle: title) }.value
+        guard try capture() == focus else { throw failure("定位期间焦点窗口或标题发生变化。请再次识别或使用链接。") }
+        return (target, title)
+    }
+
+    @MainActor
     static func capture(requestPermission: Bool = false) throws -> Focus? {
         guard AXIsProcessTrusted() else {
             if requestPermission {

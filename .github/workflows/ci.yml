@@ -20,3 +20,4 @@ jobs:
       - run: python3 -B -m unittest discover -s macos/Tests -p test_installer.py
       - run: python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
       - run: python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
+      - run: python3 -B -m unittest discover -s macos/Tests -p test_adaptive_preview.py

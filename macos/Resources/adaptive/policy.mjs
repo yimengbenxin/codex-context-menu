@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+const defaults = JSON.parse(fs.readFileSync(new URL('./defaults.json', import.meta.url), 'utf8'));
 
 export function modelBounds(catalog, model, options = {}) {
   const matches = catalog.models?.filter(entry => entry.slug === model) ?? [];
@@ -10,8 +13,8 @@ export function modelBounds(catalog, model, options = {}) {
   const percent = entry.effective_context_window_percent;
   if (![initial, maximum, percent].every(Number.isSafeInteger) || initial <= 0 || maximum < initial || percent <= 0 || percent > 100)
     throw new Error('Selected model has invalid official context bounds');
-  const lower = options.lower_percent ?? 45;
-  const upper = options.upper_percent ?? 65;
+  const lower = options.lower_percent ?? defaults.lower_percent;
+  const upper = options.upper_percent ?? defaults.upper_percent;
   if (![lower, upper].every(Number.isFinite) || lower < 0 || lower >= upper || upper > 100)
     throw new Error('Adaptive thresholds must satisfy 0 <= lower < upper <= 100');
   const provided = options.tiers ?? [null, null, null];
@@ -27,6 +30,13 @@ export function modelBounds(catalog, model, options = {}) {
   if (tiers.some((tier, index) => index > 0 && tier < tiers[index - 1]))
     throw new Error('Adaptive tiers must be ordered after applying official bounds');
   return {model, tiers: [...new Set(tiers)], maximum, percent, thresholds: {lower: lower / 100, upper: upper / 100}};
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--preview') {
+  const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+  const bounds = modelBounds(input.catalog, input.model);
+  const initial = bounds.tiers[0];
+  process.stdout.write(JSON.stringify({...bounds, display_tiers: [initial, Math.floor((initial + bounds.maximum) / 2), bounds.maximum]}));
 }
 
 export function feedback(bounds, state, retained, successful, manual) {

@@ -77,7 +77,7 @@ test('thread overrides isolate feedback and reset to project context', async con
 test('model bounds follow metadata and never invent a maximum', () => {
   assert.deepEqual(bounds.tiers, [160000, 200000, 240000]);
   const changed = {models: [{slug: 'fixture', context_window: 180000, effective_context_window_percent: 90}]};
-  assert.deepEqual(modelBounds(changed, 'fixture'), {model: 'fixture', tiers: [180000], maximum: 180000, percent: 90, thresholds: {lower: 0.45, upper: 0.65}});
+  assert.deepEqual(modelBounds(changed, 'fixture'), {model: 'fixture', tiers: [180000], maximum: 180000, percent: 90, thresholds: {lower: 0.35, upper: 0.55}});
   assert.throws(() => modelBounds(catalog, 'missing'));
   assert.throws(() => modelBounds({models: [...catalog.models, ...catalog.models]}, 'fixture'));
   assert.throws(() => modelBounds({models: [{...catalog.models[0], max_context_window: 10}]}, 'fixture'));
@@ -111,6 +111,18 @@ test('ambiguous feedback requires two successes and low retention resets it', ()
   assert.equal(first.budget, 160000);
   assert.equal(feedback(bounds, first, 80000, true, false).budget, 200000);
   assert.equal(feedback(bounds, first, 10000, true, false).ambiguous, 0);
+});
+
+test('default 35 and 55 percent are exact promotion boundaries, not compaction triggers', () => {
+  const below = feedback(bounds, initial, 55999, true, false);
+  assert.equal(below.ambiguous, 0);
+  const first = feedback(bounds, initial, 56000, true, false);
+  assert.equal(first.budget, 160000);
+  assert.equal(feedback(bounds, first, 56000, true, false).budget, 200000);
+  assert.equal(feedback(bounds, initial, 87999, true, false).budget, 160000);
+  assert.equal(feedback(bounds, initial, 88000, true, false).budget, 200000);
+  assert.equal(feedback(bounds, first, 88000, false, false).budget, 160000);
+  assert.equal(feedback(bounds, first, 88000, true, true).budget, 160000);
 });
 
 test('failed, manual and invalid feedback never expands', () => {

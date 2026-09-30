@@ -14,6 +14,7 @@
     {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_installer.py"], "timeout": 180},
     {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_adaptive_settings.py"], "timeout": 180},
     {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_runtime_probe.py"], "timeout": 180},
+    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_adaptive_preview.py"], "timeout": 180},
     {"argv": ["python3", "-B", "macos/Tests/test_adaptive_boundary.py"], "timeout": 180}
   ],
   "build_commands": [

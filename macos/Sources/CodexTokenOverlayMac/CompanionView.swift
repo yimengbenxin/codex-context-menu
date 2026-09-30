@@ -227,21 +227,30 @@ struct ContextSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary) }
                 } else if model.mode == .adaptive {
                     HStack(alignment: .top, spacing: 16) {
-                        adaptiveField("两次触发线（%）", input: $model.lowerThreshold, placeholder: "45")
-                        adaptiveField("一次触发线（%）", input: $model.upperThreshold, placeholder: "65")
+                        adaptiveField("两次触发线（%）", input: $model.lowerThreshold, placeholder: model.thresholdPlaceholder(true))
+                        adaptiveField("一次触发线（%）", input: $model.upperThreshold, placeholder: model.thresholdPlaceholder(false))
+                    }
+                    if !model.lowerThreshold.isEmpty || !model.upperThreshold.isEmpty {
+                        Text("已保存的阈值会覆盖灰色默认值；点击恢复默认并保存，才会改用新默认。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(0..<3) { index in
                             adaptiveField(["初始档（K）", "中间档（K）", "上限档（K）"][index],
-                                input: $model.tierInputs[index], placeholder: ["官方初始值", "初始与上限中点", "官方上限"][index])
+                                input: $model.tierInputs[index], placeholder: model.tierPlaceholder(index))
                         }
                     }
-                    Text("初始与上限留空跟随官方；中间档留空取当前初始与上限的算术中点。输入值仍受官方模型上限约束。")
+                    Text("灰色数字为默认参考，留空按默认生效。初始与上限跟随官方；中间档取当前初始与上限的算术中点。输入值仍受官方模型上限约束。")
                         .font(.caption).foregroundStyle(.secondary)
+                    if let preview = status.adaptive_preview {
+                        Text("档位来源：官方本地模型目录 · \(preview.model)").font(.caption).foregroundStyle(.secondary)
+                    } else if let reason = status.adaptive_preview_reason {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("从自定义切回自适应，会从初始档重新开始，不沿用自定义数值或历史升档。")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("恢复默认阈值与官方档位") {
-                        model.lowerThreshold = "45"; model.upperThreshold = "65"; model.tierInputs = ["", "", ""]
+                        model.lowerThreshold = ""; model.upperThreshold = ""; model.tierInputs = ["", "", ""]
                     }.disabled(model.saving || model.repairingRuntime)
                     if let validation = model.validation { InlineMessage(text: validation, symbol: "exclamationmark.circle", color: .red) }
                 }

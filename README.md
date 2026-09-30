@@ -2,9 +2,9 @@
 
 一个原生 macOS 伴随工具：不用在聊天里发送配置指令，即可为 Codex 对话或项目选择上下文策略，并查看 Token 用量与账户额度。
 
-[下载试用版](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.5) · [反馈问题](https://github.com/yimengbenxin/codex-context-menu/issues) · [English](README.en.md)
+[下载试用版](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.6) · [反馈问题](https://github.com/yimengbenxin/codex-context-menu/issues) · [English](README.en.md)
 
-**非 OpenAI 官方产品，未获 OpenAI 背书。0.6.5 是兼容范围有限的实验性试用版，不是适用于所有 Codex 安装的通用补丁。**
+**非 OpenAI 官方产品，未获 OpenAI 背书。0.6.6 是兼容范围有限的实验性试用版，不是适用于所有 Codex 安装的通用补丁。**
 
 ## 为什么做这个工具
 
@@ -46,11 +46,11 @@
 
 ### 下载与安装
 
-到 [0.6.5 发布页](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.5) 下载：
+到 [0.6.6 发布页](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.6) 下载：
 
-- `CodexContextMenu-0.6.5-macOS-arm64.dmg`：磁盘映像。
-- `CodexContextMenu-0.6.5-macOS-arm64.zip`：压缩包，与 DMG 包含相同应用和安装程序。
-- `v0.6.5-SHA256.txt`：文件校验值。
+- `CodexContextMenu-0.6.6-macOS-arm64.dmg`：磁盘映像。
+- `CodexContextMenu-0.6.6-macOS-arm64.zip`：压缩包，与 DMG 包含相同应用和安装程序。
+- `v0.6.6-SHA256.txt`：文件校验值。
 
 1. 校验下载文件，解压 ZIP 或挂载 DMG。
 2. 将 `CodexContextMenu.app` 拖入 DMG 中的 Applications 入口，再从应用目录打开。挂载 DMG 本身并不等于安装。
@@ -89,8 +89,8 @@ python3 install_local.py ./CodexContextMenu.app --check
 
 自动压缩成功后，依据保留比例判断：
 
-- 默认保留比例 **≥65%**：升一档。
-- 默认 **≥45% 且 <65%**：连续两次满足条件后升一档。
+- 默认保留比例 **≥55%**：升一档。
+- 默认 **≥35% 且 <55%**：连续两次满足条件后升一档。
 - 低于两次触发线：重置连续计数。
 - 可将阈值改为例如 **30 / 50**；三个档位分别输入整数 K，留空使用对应官方值。档位须有序，并受官方模型上限约束。
 - 初始与上限留空取官方值；中间档留空时，取当前初始与上限的算术中点，包含你自定义的端点。
@@ -141,7 +141,7 @@ flowchart LR
 
 ## 验证结果与已知限制
 
-0.6.5 的单元检查包含 **80 项**：33 项 Swift、24 项 Node、11 项项目配置、3 项对话配置、3 项安装器、3 项自适应参数及 3 项协议检查。另有 0.159.0 / 0.159.2 隔离原生生命周期、签名与安装前检查及发布资产校验。
+0.6.6 的单元检查包含 **88 项**：36 项 Swift、25 项 Node、11 项项目配置、3 项对话配置、3 项安装器、4 项自适应参数、3 项协议检查及 3 项档位预览。另有 0.159.0 / 0.159.2 隔离原生生命周期、签名与安装前检查及发布资产校验。
 
 已验证：
 
@@ -154,7 +154,11 @@ flowchart LR
 
 **尚未证明**：真实超长对话自适应升档的完整桌面验收、所有插件兼容性及长期稳定性。合成生命周期测试不是模型压缩速度或质量评测。
 
-当前为菜单栏伴随应用，**Dock 常驻及完整缩小/关闭体验、菜单栏直接选择三种策略、双击图标拉到前台**属于后续迭代，不包含在本次发布中。
+右键菜单栏项目 → **修改当前对话上下文** → 选择官方默认、自适应或自定义，在小面板核对目标并保存；始终仅此对话。自定义可直接输入 K，深度链接支持原生粘贴。主窗口未保存的草稿不会被快捷面板覆盖。单击打开菜单，双击拉起完整设置。Dock 常驻仍属于后续迭代。
+
+菜单栏默认仅显示小图标，避免统计文字挤占空间；取消“菜单栏仅显示图标”可恢复文字统计。应用激活时，顶部“上下文”菜单也提供相同快捷入口。
+
+自适应输入框的灰色数字是默认参考，留空跟随默认；35 / 55 决定压缩后升档，不决定压缩触发时机。原来显式保存的 45 / 65 等覆盖会保留；点击“恢复默认阈值与官方档位”并保存后改用新默认。档位来自目标模型的官方本地目录，不固定写死；例如目录给出 272K / 872K 时，中间默认值是 572K，不是 485K。无法读取目录时明确提示，不猜模型或上限。
 
 ## 开发与打包
 
@@ -168,7 +172,7 @@ python3 -B -m unittest discover -s macos/Tests -p test_thread_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_installer.py
 python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
-bash scripts/build_release.sh 0.6.5
+bash scripts/build_release.sh 0.6.6
 ```
 
 可选原生夹具：在隔离环境安装 `requirements-test.txt`，具备受支持的官方程序和模型元数据后，运行 `python3 -B macos/Tests/test_adaptive_boundary.py`。它使用本地回环上的合成响应，不代表真实模型的质量和速度。

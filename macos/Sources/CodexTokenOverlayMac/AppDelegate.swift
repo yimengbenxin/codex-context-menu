@@ -40,6 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var forceNextPoll = true
     private let contextSettings = ContextSettingsController()
     private var contextMenuItem: NSMenuItem!
+    private var statusMenu: NSMenu!
+    private var pendingStatusClick: DispatchWorkItem?
+    private var compactMenuItem: NSMenuItem!
+    private var iconOnly = UserDefaults.standard.object(forKey: "menu.iconOnly") as? Bool ?? true
+    private let quickContext = QuickContextController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.mainMenu = NativeEditingMenu.make()
@@ -70,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(codexLifecycleChanged(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         updateCodexVisibility()
         contextSettings.identifyCurrent = { [weak self] in self?.identifyContextTarget() }
+        quickContext.openSettings = { [weak self] in self?.contextSettings.chooseProject() }
         contextSettings.usage.startMonitoring()
         contextSettings.model.inspectRuntime()
         if !CommandLine.arguments.contains("--background") || !FileManager.default.isExecutableFile(atPath: backend.path) {
@@ -78,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        pendingStatusClick?.cancel()
         timer?.invalidate()
         routeMonitor.stop()
     }
@@ -97,8 +104,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.title = "Codex —"
+            button.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "Codex 上下文快捷设置")
+            button.image?.isTemplate = true
+            button.imagePosition = .imageLeading
             button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
             button.toolTip = L10n.waiting
+            button.target = self
+            button.action = #selector(statusClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
     }
 
@@ -120,6 +133,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(routeMenuItem)
         menu.addItem(.separator())
 
+        let quickItem = NSMenuItem(title: "修改当前对话上下文", action: nil, keyEquivalent: "")
+        quickItem.submenu = makeQuickMenu()
+        menu.addItem(quickItem)
+        let applicationQuick = NSMenuItem(title: "上下文", action: nil, keyEquivalent: "")
+        applicationQuick.submenu = makeQuickMenu()
+        NSApp.mainMenu?.addItem(applicationQuick)
+
         contextMenuItem = NSMenuItem(title: "识别当前对话并更改上下文…", action: #selector(changeProjectContext(_:)), keyEquivalent: "")
         contextMenuItem.target = self
         menu.addItem(contextMenuItem)
@@ -127,6 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         chooseProject.target = self
         menu.addItem(chooseProject)
         menu.addItem(.separator())
+
+        compactMenuItem = NSMenuItem(title: "菜单栏仅显示图标", action: #selector(toggleCompactMenu(_:)), keyEquivalent: "")
+        compactMenuItem.target = self
+        menu.addItem(compactMenuItem)
 
         let fieldsItem = NSMenuItem(title: L10n.displayFields, action: nil, keyEquivalent: "")
         let fieldsMenu = NSMenu()
@@ -186,7 +210,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        statusMenu = menu
+    }
+
+    @objc private func statusClicked(_ sender: NSStatusBarButton) {
+        pendingStatusClick?.cancel()
+        let gesture = StatusItemGesture.action(rightClick: NSApp.currentEvent?.type == .rightMouseUp,
+            clickCount: NSApp.currentEvent?.clickCount ?? 1)
+        if gesture == .window {
+            quickContext.close()
+            contextSettings.chooseProject()
+        } else if gesture == .menu {
+            showStatusMenu()
+        } else {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.showStatusMenu()
+            }
+            pendingStatusClick = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval + 0.04, execute: work)
+        }
+    }
+
+    private func showStatusMenu() {
+        guard let button = statusItem.button else { return }
+        statusMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY), in: button)
+    }
+
+    private func makeQuickMenu() -> NSMenu {
+        let menu = NSMenu(title: "上下文")
+        for (index, mode) in ContextMode.allCases.enumerated() {
+            let item = NSMenuItem(title: mode.title + "…", action: #selector(quickContextMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func toggleCompactMenu(_ sender: NSMenuItem) {
+        iconOnly.toggle()
+        UserDefaults.standard.set(iconOnly, forKey: "menu.iconOnly")
+        apply(snapshot: lastSnapshot, routeStatus: lastRouteStatus)
+    }
+
+    @objc private func quickContextMode(_ sender: NSMenuItem) {
+        guard ContextMode.allCases.indices.contains(sender.tag), let button = statusItem.button else { return }
+        quickContext.present(relativeTo: button, mode: ContextMode.allCases[sender.tag])
     }
 
     private func refresh() {
@@ -240,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem.button?.toolTip = L10n.noTokenSnapshot
         }
 
+        if iconOnly { statusItem.button?.title = "" }
         updateMenu(snapshot: snapshot, routeStatus: routeStatus)
     }
 
@@ -261,6 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lockMenuItem.state = isTaskLocked ? .on : .off
         lockMenuItem.isEnabled = snapshot != nil || isTaskLocked
         contextMenuItem.isEnabled = routeStatus.isConnected || AXIsProcessTrusted()
+        compactMenuItem.state = iconOnly ? .on : .off
     }
 
     private func refreshFieldMenuStates() {
@@ -340,22 +412,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task {
             defer { contextSettings.model.identifying = false }
             do {
-                guard let focus = try FocusedContextTarget.capture(requestPermission: true) else {
-                    contextSettings.model.focusPermissionRequired = true
-                    throw FocusedContextTarget.failure("需要辅助功能权限才能读取焦点窗口标题。请点击下方按钮授权一次，再重试；也可粘贴深度链接，无需此权限。")
-                }
-                let focusedTitle = focus.title
-                let target = try await Task.detached(priority: .userInitiated) {
-                    try ContextTarget.locate(focusedTitle: focusedTitle)
-                }.value
-                guard try FocusedContextTarget.capture() == focus else {
-                    throw FocusedContextTarget.failure("定位期间焦点窗口或标题发生变化。请再次识别或使用链接。")
-                }
+                let (target, title) = try await FocusedContextTarget.resolve(requestPermission: true)
                 let snapshot = lastSnapshot?.threadID == target.threadID ? lastSnapshot : nil
                 contextSettings.present(project: target.project, threadID: target.threadID,
                     observedWindow: snapshot?.contextWindowTokens, observedTarget: snapshot?.targetContextBudgetTokens,
-                    origin: .focused, title: focus.title)
-            } catch { contextSettings.model.failTarget(error.localizedDescription) }
+                    origin: .focused, title: title)
+            } catch {
+                contextSettings.model.focusPermissionRequired = !AXIsProcessTrusted()
+                contextSettings.model.failTarget(error.localizedDescription)
+            }
         }
     }
 }

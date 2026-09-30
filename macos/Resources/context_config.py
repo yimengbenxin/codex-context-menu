@@ -100,6 +100,7 @@ def status(root):
             "adaptive": adaptive_enabled(document),
             "adaptive_available": capability.get("adaptive", False),
             "adaptive_reason": capability.get("reason"), "adaptive_options": adaptive_settings.from_project(document),
+            "adaptive_defaults": adaptive_settings.options(),
             "trusted": trusted, "inherited": inherited}
 
 
@@ -172,6 +173,9 @@ def save(root, value, expected_revision, mode="custom", adaptive_raw=None):
 
 if __name__ == "__main__":
     try:
+        preview = sys.argv[-1:] == ["--preview"]
+        if preview:
+            sys.argv.pop()
         command, project_root = sys.argv[1:3]
         if command == "thread-status":
             result = thread_status(status(project_root), sys.argv[3], read_config, revision)
@@ -184,6 +188,9 @@ if __name__ == "__main__":
             result = save(project_root, *sys.argv[3:7])
         else:
             raise ValueError("不支持的设置命令。")
+        if preview:
+            from adaptive_preview import preview_status
+            result.update(preview_status(result, sys.argv[3] if command.startswith("thread-") else None))
         print(json.dumps(result, ensure_ascii=False))
     except Exception as error:
         print(str(error), file=sys.stderr)

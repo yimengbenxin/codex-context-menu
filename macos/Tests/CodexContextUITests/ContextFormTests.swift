@@ -3,14 +3,50 @@ import AppKit
 @testable import CodexTokenOverlayMac
 
 final class ContextFormTests: XCTestCase {
+    private let defaults = AdaptiveOptions(lower_percent: 35, upper_percent: 55)
     func testAdaptiveInputsValidateThresholdsAndOrderedOptionalTiers() throws {
-        let selected = try AdaptiveOptions.parse(lower: "30", upper: "50", tiers: ["272", "485", "872"])
+        let selected = try AdaptiveOptions.parse(lower: "30", upper: "50", tiers: ["272", "485", "872"], defaults: defaults)
         XCTAssertEqual(selected.lower_percent, 30)
         XCTAssertEqual(selected.tiers, [272000, 485000, 872000])
-        XCTAssertEqual(try AdaptiveOptions.parse(lower: "45", upper: "65", tiers: ["", "", ""]).tiers, [nil, nil, nil])
-        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "60", upper: "50", tiers: ["", "", ""]))
-        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "nan", upper: "65", tiers: ["", "", ""]))
-        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "45", upper: "65", tiers: ["485", "272", "872"]))
+        XCTAssertEqual(try AdaptiveOptions.parse(lower: "", upper: " ", tiers: ["", "", ""], defaults: defaults), defaults)
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "60", upper: "50", tiers: ["", "", ""], defaults: defaults))
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "nan", upper: "65", tiers: ["", "", ""], defaults: defaults))
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "45", upper: "65", tiers: ["485", "272", "872"], defaults: defaults))
+    }
+
+    func testBlankThresholdsUseProducerDefaultsAndKeepExplicitOverrides() throws {
+        XCTAssertEqual(try AdaptiveOptions.parse(lower: "", upper: "65", tiers: ["", "", ""], defaults: defaults).lower_percent, 35)
+        XCTAssertEqual(try AdaptiveOptions.parse(lower: "45", upper: "", tiers: ["", "", ""], defaults: defaults).upper_percent, 55)
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "60", upper: "", tiers: ["", "", ""], defaults: defaults))
+        let changed = AdaptiveOptions(lower_percent: 20, upper_percent: 40)
+        XCTAssertEqual(try AdaptiveOptions.parse(lower: "", upper: "", tiers: ["", "", ""], defaults: changed), changed)
+    }
+
+    func testStatusClickDispatchPreservesRightClickAndDoubleClick() {
+        XCTAssertEqual(StatusItemGesture.action(rightClick: true, clickCount: 2), .menu)
+        XCTAssertEqual(StatusItemGesture.action(rightClick: false, clickCount: 1), .delayedMenu)
+        XCTAssertEqual(StatusItemGesture.action(rightClick: false, clickCount: 2), .window)
+    }
+
+    @MainActor
+    func testQuickFormDoesNotReplaceUnsavedMainWindowDraftAndDisplaysNumericDefaults() throws {
+        let main = ContextSettingsController()
+        main.model.mode = .custom
+        main.model.input = "485"
+        let quick = QuickContextController()
+        let document = """
+        {"root":"/project","path":"/settings","revision":"r","adaptive":false,"adaptive_available":true,"trusted":true,"inherited":[],
+         "adaptive_defaults":{"lower_percent":35,"upper_percent":55,"tiers":[null,null,null]},
+         "adaptive_preview":{"model":"fixture","tiers":[300000,600000,900000],"maximum":900000}}
+        """
+        quick.model.status = try JSONDecoder().decode(ProjectContextStatus.self, from: Data(document.utf8))
+        quick.model.mode = .adaptive
+        XCTAssertEqual(quick.model.thresholdPlaceholder(true), "35")
+        XCTAssertEqual(quick.model.thresholdPlaceholder(false), "55")
+        XCTAssertEqual((0..<3).map { quick.model.tierPlaceholder($0) }, ["300", "600", "900"])
+        XCTAssertEqual(try quick.model.adaptiveOptions(), defaults)
+        XCTAssertEqual(main.model.input, "485")
+        XCTAssertEqual(main.model.mode, .custom)
     }
 
     @MainActor

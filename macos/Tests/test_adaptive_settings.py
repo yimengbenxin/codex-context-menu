@@ -10,20 +10,29 @@ RESOURCES = Path(__file__).resolve().parents[1] / "Resources"
 SPEC = importlib.util.spec_from_file_location("adaptive_settings_backend_test", RESOURCES / "context_config.py")
 backend = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(backend)
-from adaptive_settings import options
+from adaptive_settings import options, overrides, from_project
 
 FIRST = "11111111-1111-4111-8111-111111111111"
 
 
 class AdaptiveSettingsTests(unittest.TestCase):
     def test_thresholds_and_tiers_are_validated(self):
-        self.assertEqual(options()["lower_percent"], 45)
+        self.assertEqual(options()["lower_percent"], 35)
+        self.assertEqual(options()["upper_percent"], 55)
         selected = options({"lower_percent": 30, "upper_percent": 50, "tiers": [272000, 485000, 872000]})
         self.assertEqual(selected["upper_percent"], 50)
         for value in [{"lower_percent": 60, "upper_percent": 50}, {"upper_percent": 101},
                       {"lower_percent": True}, {"tiers": [10, 9, 100]}, {"tiers": [0, None, None]}]:
             with self.assertRaises(ValueError):
                 options(value)
+
+    def test_default_values_are_not_stored_as_overrides_and_legacy_values_survive(self):
+        self.assertEqual(overrides(options()), {})
+        self.assertEqual(options(overrides(options())), options())
+        legacy = {"lower_percent": 45, "upper_percent": 65}
+        self.assertEqual(overrides(legacy), legacy)
+        self.assertEqual(from_project({"codex_context_tool": legacy})["lower_percent"], 45)
+        self.assertEqual(from_project({})["lower_percent"], 35)
 
     def exercise(self, thread):
         with tempfile.TemporaryDirectory() as temporary:

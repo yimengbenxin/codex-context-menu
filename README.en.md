@@ -4,7 +4,7 @@ A native macOS companion for choosing a Codex conversation's context budget with
 
 [简体中文](README.md) · [Downloads](https://github.com/yimengbenxin/codex-context-menu/releases) · [Issues](https://github.com/yimengbenxin/codex-context-menu/issues)
 
-**Unofficial community software. Not developed, endorsed or supported by OpenAI.** Version 0.6.5 is an experimental, narrowly compatible release, not a universal Codex patch.
+**Unofficial community software. Not developed, endorsed or supported by OpenAI.** Version 0.6.6 is an experimental, narrowly compatible release, not a universal Codex patch.
 
 ## Why / problems solved
 
@@ -15,7 +15,7 @@ Long tasks need explicit context-budget control without polluting project conver
 - Native settings window with official-default, adaptive and custom integer-K modes. Blank custom input clears the selected override.
 - Identify the current or most recently selected Codex window through its app WebArea title, resolve an exact unique local display name to a thread ID, and verify session metadata. Multiple subscriptions no longer block focused identification. Duplicate names require a deep link. Native Command+V editing remains available.
 - Thread-only overrides, or explicitly selected project-wide settings. Thread overrides do not affect sibling conversations or new forks.
-- Adaptive thresholds (default 45/65 percent) and three ordered tiers are editable. Blank tiers follow official initial, arithmetic midpoint and maximum metadata. Returning from custom mode starts at the initial tier with a new activation revision; remaining in adaptive preserves its tier across restarts.
+- Adaptive thresholds (default 35/55 percent) and three ordered tiers are editable. Gray numeric placeholders show defaults; blank fields follow defaults. Previously saved explicit thresholds are preserved until reset. Blank tiers follow official initial, arithmetic midpoint and maximum metadata. Returning from custom mode starts at the initial tier with a new activation revision; remaining in adaptive preserves its tier across restarts. These thresholds control promotion after compaction, not when compaction starts.
 - Default/custom changes load at the next idle turn using the **unmodified signed official CLI**. No compression-model or reasoning-effort optimization is bundled.
 - Local seven-day Token reporting and manually requested official account quota via pinned CodexBar CLI. Automatic quota refresh is off by default.
 
@@ -32,7 +32,7 @@ Discovery supports Codex.app / ChatGPT.app under system or user Applications, wi
 
 Use the existing Codex-managed Python runtime, or Python 3.11+ at `/opt/homebrew/bin/python3` or `/usr/local/bin/python3`. No Python libraries need installing for normal use; the TOML editor is vendored with its license.
 
-1. Download `CodexContextMenu-0.6.5-macOS-arm64.zip` or the equivalent DMG from Releases. Verify against `v0.6.5-SHA256.txt`.
+1. Download `CodexContextMenu-0.6.6-macOS-arm64.zip` or the equivalent DMG from Releases. Verify against `v0.6.6-SHA256.txt`.
 2. Drag the app to Applications and open it. Mounting a DMG is not installation.
 3. Click the in-app component setup/revalidation button. Copying .app alone previously missed runtime integration; restarting cannot install it. Alternatively, keep the supplied files together and double-click Install.command for a backed-up per-user installation. No administrator password is needed.
 4. Fully quit and reopen Codex **once for initial integration**. This is not a per-conversation restart. Installing an updated runtime component also requires loading that new component; ordinary budget changes do not.
@@ -56,7 +56,7 @@ One K means 1,000 tokens. The actual window can be reduced by the official effec
 
 Setting changes apply **between turns**, not during generation. Native resume owns idle-cache reconstruction; active, externally subscribed or unrepresentable permission states can prevent a reload. A successful save is not proof of activation: observe the running window. Reloading can temporarily reduce cache reuse; zero cache cost is not promised.
 
-The current app is a menu-bar accessory, not a Dock-first app. A Dock-focused window lifecycle, quick mode selection in the menu bar and double-click activation are **future work**, not shipped 0.6.5 features. Real long-history adaptive promotion has not received full desktop acceptance; synthetic lifecycle tests are not a quality benchmark.
+Right-click the menu-bar item → current-conversation context → default, adaptive or custom, then confirm and save in a compact panel. Custom K input and deep-link paste are supported. Quick editing is conversation-only and does not replace unsaved full-window drafts. Single-click opens the menu; double-click raises full settings. A Dock-focused lifecycle remains future work. Real long-history adaptive promotion has not received full desktop acceptance; synthetic lifecycle tests are not a quality benchmark.
 
 ## Architecture / how it works
 
@@ -100,10 +100,10 @@ python3 -B -m unittest discover -s macos/Tests -p test_thread_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_installer.py
 python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
-bash scripts/build_release.sh 0.6.5
+bash scripts/build_release.sh 0.6.6
 ```
 
-The 0.6.5 suite includes 80 unit checks: 33 Swift, 24 Node, 11 project, 3 thread, 3 installer, 3 adaptive-setting and 3 protocol checks. Focus tests cover exact/duplicate/renamed/archived titles, bound SQL characters, read-only lookup, changed focus fingerprints and multiple subscriptions. Native synthetic-response tests cover default/custom/adaptive, recovery, restart/fork, preserved history prefixes and SQLite integrity. Earlier live desktop checks verified 485K → 315K → 485K effective windows without restarting the official processes, plus a genuine desktop tool call. Native clipboard paste and link resolution were exercised, not replaced by direct field assignment.
+The 0.6.6 suite includes 88 unit checks: 36 Swift, 25 Node, 11 project, 3 thread, 3 installer, 4 adaptive-setting, 3 protocol and 3 preview checks. Focus tests cover exact/duplicate/renamed/archived titles, bound SQL characters, read-only lookup, changed focus fingerprints and multiple subscriptions. Native synthetic-response tests cover default/custom/adaptive, recovery, restart/fork, preserved history prefixes and SQLite integrity. Earlier live desktop checks verified 485K → 315K → 485K effective windows without restarting the official processes, plus a genuine desktop tool call. Native clipboard paste and link resolution were exercised, not replaced by direct field assignment.
 
 To run the optional native fixture, install `requirements-test.txt` into an isolated environment and run `python3 -B macos/Tests/test_adaptive_boundary.py` with the supported official app and model metadata available. It uses synthetic responses on loopback; it is not a real-model speed or quality test.
 

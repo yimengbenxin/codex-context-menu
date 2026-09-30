@@ -69,7 +69,7 @@ def save_thread(project, thread_id, value, expected, mode, read_config, revision
                 path.unlink()
         else:
             entry = {"root": project["root"], "thread": thread_id.lower(), "mode": mode, "window": tokens,
-                "adaptive_options": adaptive_settings.options(adaptive_raw) if adaptive_raw is not None else current["adaptive_options"],
+                "adaptive_options": adaptive_settings.overrides(adaptive_raw if adaptive_raw is not None else current["adaptive_options"]),
                 "adaptive_activation": current["adaptive_activation"] if mode != "adaptive" or current["adaptive"] else str(uuid.uuid4())}
             temporary_descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".settings-")
             try:
