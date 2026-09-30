@@ -1,9 +1,13 @@
 import {spawn} from 'node:child_process';
 import readline from 'node:readline';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {AdaptiveController} from './controller.mjs';
 
-const binary = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';
+const binary = process.env.CODEX_CONTEXT_OFFICIAL_BINARY ?? JSON.parse(fs.readFileSync(
+  path.join(os.homedir(), 'Library/Application Support/CodexContextTool/official-adaptive-runtime.json'), 'utf8')).binary;
 const argumentsList = process.argv.slice(2);
 const appServer = argumentsList.includes('app-server') && !argumentsList.some(argument => argument.startsWith('generate-'));
 const child = spawn(binary, argumentsList,

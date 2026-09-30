@@ -16,19 +16,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "vendor"))
 import tomlkit
 from thread_settings import thread_status, save_thread
+import adaptive_settings
 
 KEYS = ("model_context_window", "model_auto_compact_token_limit")
 
 
-def adaptive_available():
+def adaptive_status():
     backend = Path.home() / "Library/Application Support/CodexContextTool/backend"
     if not backend.exists():
-        return False
+        return {"adaptive": False, "reason": "只复制应用尚未完成接入。请在本工具中完成组件接入；重启不会补装组件。"}
+    if backend.resolve().parent.parent != Path(__file__).resolve().parent:
+        return {"adaptive": False, "reason": "已接入组件属于另一份应用安装。请为当前应用完成接入 / 重新验证。"}
     try:
         result = subprocess.run([str(backend), "--context-capability"], capture_output=True, text=True, timeout=20)
-        return result.returncode == 0 and json.loads(result.stdout).get("adaptive", False)
+        return json.loads(result.stdout) if result.returncode == 0 else {"adaptive": False, "reason": "组件检查失败，请重新验证接入。"}
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        return False
+        return {"adaptive": False, "reason": "组件检查失败，请重新验证接入。"}
 
 
 def adaptive_enabled(document):
@@ -91,14 +94,16 @@ def status(root):
         if entries:
             trusted = entries[0].get("trust_level") == "trusted"
             break
+    capability = adaptive_status()
     return {"root": str(root), "path": str(path), "revision": revision(raw),
             "window": document.get(KEYS[0]), "compact": document.get(KEYS[1]),
             "adaptive": adaptive_enabled(document),
-            "adaptive_available": adaptive_available(),
+            "adaptive_available": capability.get("adaptive", False),
+            "adaptive_reason": capability.get("reason"), "adaptive_options": adaptive_settings.from_project(document),
             "trusted": trusted, "inherited": inherited}
 
 
-def save(root, value, expected_revision, mode="custom"):
+def save(root, value, expected_revision, mode="custom", adaptive_raw=None):
     if mode not in ("default", "custom", "adaptive"):
         raise ValueError("不支持的上下文模式。")
     tokens = parse_k(value) if mode == "custom" else None
@@ -127,6 +132,7 @@ def save(root, value, expected_revision, mode="custom"):
         if features is not None:
             features.pop("adaptive_context_budget", None)
         if mode == "adaptive":
+            adaptive_settings.write_project(document, initial, adaptive_raw)
             if features is None:
                 features = document["features"] = tomlkit.table()
             if features.get("token_budget") or document.get("model_auto_compact_token_limit_scope") == "body_after_prefix":
@@ -170,11 +176,12 @@ if __name__ == "__main__":
         if command == "thread-status":
             result = thread_status(status(project_root), sys.argv[3], read_config, revision)
         elif command == "thread-save":
-            result = save_thread(status(project_root), *sys.argv[3:7], read_config, revision, parse_k)
+            result = save_thread(status(project_root), *sys.argv[3:7], read_config, revision, parse_k,
+                adaptive_raw=sys.argv[7] if len(sys.argv) > 7 else None)
         elif command == "status":
             result = status(project_root)
         elif command == "save":
-            result = save(project_root, *sys.argv[3:6])
+            result = save(project_root, *sys.argv[3:7])
         else:
             raise ValueError("不支持的设置命令。")
         print(json.dumps(result, ensure_ascii=False))

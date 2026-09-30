@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 import CodexTokenCore
 
@@ -70,7 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateCodexVisibility()
         contextSettings.identifyCurrent = { [weak self] in self?.identifyContextTarget() }
         contextSettings.usage.startMonitoring()
-        if CommandLine.arguments.contains("--show-settings") {
+        contextSettings.model.inspectRuntime()
+        if !CommandLine.arguments.contains("--background") || !FileManager.default.isExecutableFile(atPath: backend.path) {
             contextSettings.chooseProject()
         }
     }
@@ -118,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(routeMenuItem)
         menu.addItem(.separator())
 
-        contextMenuItem = NSMenuItem(title: "更改当前对话所在项目的上下文…", action: #selector(changeProjectContext(_:)), keyEquivalent: "")
+        contextMenuItem = NSMenuItem(title: "识别当前对话并更改上下文…", action: #selector(changeProjectContext(_:)), keyEquivalent: "")
         contextMenuItem.target = self
         menu.addItem(contextMenuItem)
         let chooseProject = NSMenuItem(title: "手动选择项目并更改上下文…", action: #selector(chooseContextProject(_:)), keyEquivalent: "")
@@ -258,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lockMenuItem.title = isTaskLocked ? L10n.lockedTask : L10n.lockTask
         lockMenuItem.state = isTaskLocked ? .on : .off
         lockMenuItem.isEnabled = snapshot != nil || isTaskLocked
-        contextMenuItem.isEnabled = routeStatus.isConnected && routeStatus.activeWindowCount == 1 && routeStatus.threadID != nil
+        contextMenuItem.isEnabled = routeStatus.isConnected || AXIsProcessTrusted()
     }
 
     private func refreshFieldMenuStates() {
@@ -332,31 +334,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func identifyContextTarget() {
-        let route = routeMonitor.status()
-        guard route.isConnected, route.activeWindowCount == 1, let threadID = route.threadID else {
-            contextSettings.model.failTarget(route.activeWindowCount > 1
-                ? "检测到多个 Codex 窗口，无法确定焦点。请粘贴目标对话的深度链接定位。"
-                : "尚未取得唯一的桌面对话订阅，请稍后重试或粘贴深度链接。")
-            return
-        }
         contextSettings.model.identifying = true
         contextSettings.model.error = nil
+        contextSettings.model.focusPermissionRequired = false
         Task {
+            defer { contextSettings.model.identifying = false }
             do {
-                let target = try await Task.detached(priority: .userInitiated) {
-                    try ContextTarget.locate(link: "codex://threads/\(threadID)", requireDesktopRoot: true)
-                }.value
-                let current = routeMonitor.status()
-                guard current.isConnected, current.activeWindowCount == 1, current.threadID == threadID else {
-                    contextSettings.model.failTarget("定位期间对话订阅发生变化，未锁定新目标。请再次识别或使用链接。")
-                    contextSettings.model.identifying = false
-                    return
+                guard let focus = try FocusedContextTarget.capture(requestPermission: true) else {
+                    contextSettings.model.focusPermissionRequired = true
+                    throw FocusedContextTarget.failure("需要辅助功能权限才能读取焦点窗口标题。请点击下方按钮授权一次，再重试；也可粘贴深度链接，无需此权限。")
                 }
-                let snapshot = lastSnapshot?.threadID == threadID ? lastSnapshot : nil
-                contextSettings.present(project: target.project, threadID: threadID,
-                    observedWindow: snapshot?.contextWindowTokens, observedTarget: snapshot?.targetContextBudgetTokens, origin: .automatic)
+                let focusedTitle = focus.title
+                let target = try await Task.detached(priority: .userInitiated) {
+                    try ContextTarget.locate(focusedTitle: focusedTitle)
+                }.value
+                guard try FocusedContextTarget.capture() == focus else {
+                    throw FocusedContextTarget.failure("定位期间焦点窗口或标题发生变化。请再次识别或使用链接。")
+                }
+                let snapshot = lastSnapshot?.threadID == target.threadID ? lastSnapshot : nil
+                contextSettings.present(project: target.project, threadID: target.threadID,
+                    observedWindow: snapshot?.contextWindowTokens, observedTarget: snapshot?.targetContextBudgetTokens,
+                    origin: .focused, title: focus.title)
             } catch { contextSettings.model.failTarget(error.localizedDescription) }
-            contextSettings.model.identifying = false
         }
     }
 }

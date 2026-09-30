@@ -1,13 +1,21 @@
 #!/bin/zsh
 set -eu
 root="${0:A:h}"
-node="/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
-export CODEX_CONTEXT_PYTHON="${CODEX_CONTEXT_PYTHON:-$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3}"
+manifest="$HOME/Library/Application Support/CodexContextTool/official-adaptive-runtime.json"
+python="${CODEX_CONTEXT_PYTHON:-$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3}"
+for candidate in "$python" /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+  if [[ -x "$candidate" ]]; then python="$candidate"; break; fi
+done
+descriptor="$("$python" -c 'import json,sys,pathlib; p=pathlib.Path(sys.argv[1]); d=json.load(open(p)) if p.is_file() else {}; print(json.dumps(d if all(d.get(k) for k in ("binary","node","python")) else {}))' "$manifest" 2>/dev/null || printf '{}')"
+if [[ "$descriptor" == '{}' ]]; then descriptor="$("$python" "$root/../runtime_probe.py" --paths)"; fi
+export CODEX_CONTEXT_PYTHON="${CODEX_CONTEXT_PYTHON:-$("$python" -c 'import json,sys; print(json.loads(sys.argv[1])["python"])' "$descriptor")}"
+node="$("$python" -c 'import json,sys; print(json.loads(sys.argv[1])["node"])' "$descriptor")"
+export CODEX_CONTEXT_OFFICIAL_BINARY="$("$python" -c 'import json,sys; print(json.loads(sys.argv[1])["binary"])' "$descriptor")"
 case "${1:-}" in
   --context-capability|--enable-integration|--restore-integration|--restore-official)
     exec "$node" "$root/integration.mjs" "$@" ;;
 esac
-if [[ -f "$HOME/Library/Application Support/CodexContextTool/official-adaptive-runtime.json" ]] && ! "$node" "$root/integration.mjs" --validated; then
-  exec /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex "$@"
+if ! "$node" "$root/integration.mjs" --validated; then
+  exec "$CODEX_CONTEXT_OFFICIAL_BINARY" "$@"
 fi
 exec "$node" "$root/boundary.mjs" "$@"

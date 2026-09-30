@@ -14,8 +14,6 @@ HOME = Path.home()
 SUPPORT = HOME / "Library/Application Support/CodexContextTool"
 APPLICATION = HOME / "Applications/CodexContextMenu.app"
 DESKTOP = HOME / "Desktop/Codex 上下文.app"
-BINARY = Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex")
-NODE = Path("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node")
 BACKEND = SUPPORT / "backend"
 MANIFEST = SUPPORT / "official-adaptive-runtime.json"
 INTEGRATION = SUPPORT / "official-adaptive-integration.json"
@@ -75,18 +73,19 @@ if candidate.name != "CodexContextMenu.app":
 verify_bundle(candidate)
 resources = candidate / "Contents/Resources"
 compatibility = json.loads((resources / "adaptive/compatibility.json").read_text())
-if not BINARY.is_file() or not NODE.is_file():
-    raise RuntimeError("Supported official ChatGPT.app CLI/Node layout was not found in /Applications")
-if digest(BINARY) != compatibility["officialSha256"] or digest(NODE) != compatibility["nodeSha256"]:
-    raise RuntimeError("This official runtime version has not been verified for this release; installation was not changed")
-command("/usr/bin/codesign", "--verify", "--strict", str(BINARY))
-command("/usr/bin/codesign", "--verify", "--strict", str(NODE))
+sys.path[:0] = [str(resources), str(Path(__file__).parent.parent / "Resources")]
+from runtime_probe import locate
+runtime = locate()
 assert not (resources / "adaptive/desktop-check.mjs").exists()
 for file in (resources / "adaptive").glob("*.mjs"):
     assert "get_usage_limits" not in file.read_text() and "CODEX_CONTEXT_DESKTOP_CHECK" not in file.read_text()
 if "--check" in sys.argv[2:]:
-    print(json.dumps({"compatible": True, "release": compatibility["release"], "writes": False}))
+    print(json.dumps({"compatible": True, "release": compatibility["release"], "runtime": runtime, "writes": False}))
     raise SystemExit(0)
+integrate_only = "--integrate-only" in sys.argv[2:]
+preserve_window = "--preserve-window" in sys.argv[2:]
+if integrate_only:
+    APPLICATION = candidate
 
 baseline_config = Path(os.environ.get("CODEX_HOME", str(HOME / ".codex"))) / "config.toml"
 baseline = baseline_config.read_bytes() if baseline_config.exists() else None
@@ -95,32 +94,36 @@ backup.mkdir(parents=True, mode=0o700)
 for file in [BACKEND, MANIFEST, INTEGRATION, PLIST]:
     if file.exists() or file.is_symlink():
         shutil.copy2(file, backup / file.name, follow_symlinks=False)
-if APPLICATION.exists():
+if APPLICATION.exists() and not integrate_only:
     shutil.copytree(APPLICATION, backup / APPLICATION.name)
 if DESKTOP.exists():
     shutil.copytree(DESKTOP, backup / DESKTOP.name)
-staged = APPLICATION.with_name("CodexContextMenu.installing.app")
-APPLICATION.parent.mkdir(parents=True, exist_ok=True)
-if staged.exists():
-    raise RuntimeError("Unfinished installation staging directory exists")
-copy_bundle(candidate, staged)
-command("/usr/bin/codesign", "--verify", "--deep", "--strict", str(staged))
-menu_stop()
+if not integrate_only:
+    staged = APPLICATION.with_name("CodexContextMenu.installing.app")
+    APPLICATION.parent.mkdir(parents=True, exist_ok=True)
+    if staged.exists():
+        raise RuntimeError("Unfinished installation staging directory exists")
+    copy_bundle(candidate, staged)
+    command("/usr/bin/codesign", "--verify", "--deep", "--strict", str(staged))
+    if not preserve_window:
+        menu_stop()
 try:
-    if APPLICATION.exists():
-        shutil.rmtree(APPLICATION)
-    staged.rename(APPLICATION)
+    if not integrate_only:
+        if APPLICATION.exists():
+            shutil.rmtree(APPLICATION)
+        staged.rename(APPLICATION)
     adaptive = APPLICATION / "Contents/Resources/adaptive"
     if BACKEND.exists() or BACKEND.is_symlink():
         BACKEND.unlink()
     BACKEND.symlink_to(adaptive / "backend")
-    (adaptive / "backend").chmod(0o755)
+    if not integrate_only:
+        (adaptive / "backend").chmod(0o755)
     all_files = {}
     for file in (APPLICATION / "Contents/Resources").rglob("*"):
-        if file.is_file() and ("adaptive" in file.parts or "vendor" in file.parts or "usage" in file.parts or file.name in ("context_config.py", "thread_settings.py")):
+        if file.is_file() and ("adaptive" in file.parts or "vendor" in file.parts or "usage" in file.parts or file.name in ("context_config.py", "thread_settings.py", "runtime_probe.py", "adaptive_settings.py")):
             all_files[os.path.relpath(file, adaptive)] = digest(file)
     manifest = {"accepted": True, "scope": "synthetic-runtime-lifecycle-and-genuine-desktop-tools",
-        "real_long_history_accepted": False, "officialSha256": digest(BINARY), "nodeSha256": digest(NODE),
+        "real_long_history_accepted": False, **runtime, "python": sys.executable,
         "files": all_files, "release": compatibility["release"], "backup": str(backup)}
     temporary = MANIFEST.with_suffix(".tmp")
     temporary.write_text(json.dumps(manifest, indent=2))
@@ -144,23 +147,25 @@ try:
     logs = HOME / "Library/Logs"
     logs.mkdir(parents=True, exist_ok=True)
     PLIST.write_bytes(plistlib.dumps({"Label": "local.wen.CodexContextMenu", "RunAtLoad": True,
-        "ProgramArguments": [str(APPLICATION / "Contents/MacOS/CodexTokenOverlayMac")],
+        "ProgramArguments": [str(APPLICATION / "Contents/MacOS/CodexTokenOverlayMac"), "--background"],
         "ProcessType": "Interactive", "LimitLoadToSessionType": "Aqua",
         "StandardOutPath": str(logs / "CodexContextMenu.log"), "StandardErrorPath": str(logs / "CodexContextMenu.log")}))
-    menu_start()
+    if not integrate_only and not preserve_window:
+        menu_start()
     version = plistlib.loads((APPLICATION / "Contents/Info.plist").read_bytes())["CFBundleShortVersionString"]
     report = {"installed": True, "version": version, "backup": str(backup),
         "main_restart_required_once": True, "global_config_unchanged": True,
         "quota_reader_installed": True, "automatic_quota_default": False, "quota_source": "CodexBar OAuth; official OpenAI"}
     (SUPPORT / "installation.json").write_text(json.dumps(report, indent=2) + "\n")
-    command("/usr/bin/open", "-a", str(APPLICATION), "--args", "--show-settings")
+    if not integrate_only and not preserve_window:
+        command("/usr/bin/open", "-a", str(APPLICATION), "--args", "--show-settings")
     print(json.dumps(report))
 except Exception:
     if BACKEND.exists():
         command(str(BACKEND), "--restore-official", check=False)
-    if APPLICATION.exists():
+    if APPLICATION.exists() and not integrate_only:
         shutil.rmtree(APPLICATION)
-    if (backup / APPLICATION.name).exists():
+    if (backup / APPLICATION.name).exists() and not integrate_only:
         shutil.copytree(backup / APPLICATION.name, APPLICATION)
     if (backup / DESKTOP.name).exists():
         if DESKTOP.exists():
@@ -171,6 +176,6 @@ except Exception:
             file.unlink()
         if (backup / file.name).exists() or (backup / file.name).is_symlink():
             shutil.copy2(backup / file.name, file, follow_symlinks=False)
-    if PLIST.exists():
+    if PLIST.exists() and not integrate_only and not preserve_window:
         menu_start()
     raise

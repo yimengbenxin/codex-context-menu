@@ -77,7 +77,7 @@ test('thread overrides isolate feedback and reset to project context', async con
 test('model bounds follow metadata and never invent a maximum', () => {
   assert.deepEqual(bounds.tiers, [160000, 200000, 240000]);
   const changed = {models: [{slug: 'fixture', context_window: 180000, effective_context_window_percent: 90}]};
-  assert.deepEqual(modelBounds(changed, 'fixture'), {model: 'fixture', tiers: [180000], percent: 90});
+  assert.deepEqual(modelBounds(changed, 'fixture'), {model: 'fixture', tiers: [180000], maximum: 180000, percent: 90, thresholds: {lower: 0.45, upper: 0.65}});
   assert.throws(() => modelBounds(catalog, 'missing'));
   assert.throws(() => modelBounds({models: [...catalog.models, ...catalog.models]}, 'fixture'));
   assert.throws(() => modelBounds({models: [{...catalog.models[0], max_context_window: 10}]}, 'fixture'));
@@ -90,6 +90,20 @@ test('successful feedback expands one tier and respects the model maximum', () =
   assert.equal(maximum.budget, 240000);
   assert.equal(feedback(bounds, maximum, 200000, true, false).budget, 240000);
   assert.equal(initial.budget, 160000);
+});
+
+test('custom thresholds and three configured tiers govern adaptive escalation', () => {
+  const configured = modelBounds(catalog, 'fixture', {lower_percent: 30, upper_percent: 50, tiers: [100000, 150000, 230000]});
+  const start = {budget: 100000, ambiguous: 0};
+  assert.equal(feedback(configured, start, 50000, true, false).budget, 150000);
+  const once = feedback(configured, start, 30000, true, false);
+  assert.equal(once.budget, 100000);
+  assert.equal(feedback(configured, once, 30000, true, false).budget, 150000);
+  assert.equal(feedback(configured, once, 29000, true, false).ambiguous, 0);
+  assert.throws(() => modelBounds(catalog, 'fixture', {lower_percent: 65, upper_percent: 45}));
+  assert.throws(() => modelBounds(catalog, 'fixture', {tiers: [160000, 100000, 240000]}));
+  assert.deepEqual(modelBounds(catalog, 'fixture', {tiers: [160000, 200000, 900000]}).tiers, [160000, 200000, 240000]);
+  assert.deepEqual(modelBounds(catalog, 'fixture', {tiers: [200000, null, null]}).tiers, [200000, 220000, 240000]);
 });
 
 test('ambiguous feedback requires two successes and low retention resets it', () => {

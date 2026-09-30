@@ -3,6 +3,27 @@ import AppKit
 @testable import CodexTokenOverlayMac
 
 final class ContextFormTests: XCTestCase {
+    func testAdaptiveInputsValidateThresholdsAndOrderedOptionalTiers() throws {
+        let selected = try AdaptiveOptions.parse(lower: "30", upper: "50", tiers: ["272", "485", "872"])
+        XCTAssertEqual(selected.lower_percent, 30)
+        XCTAssertEqual(selected.tiers, [272000, 485000, 872000])
+        XCTAssertEqual(try AdaptiveOptions.parse(lower: "45", upper: "65", tiers: ["", "", ""]).tiers, [nil, nil, nil])
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "60", upper: "50", tiers: ["", "", ""]))
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "nan", upper: "65", tiers: ["", "", ""]))
+        XCTAssertThrowsError(try AdaptiveOptions.parse(lower: "45", upper: "65", tiers: ["485", "272", "872"]))
+    }
+
+    @MainActor
+    func testAdaptiveEditsBecomeDirtyAndRepairBlocksSaving() {
+        let model = ContextSettingsModel()
+        model.mode = .adaptive
+        model.lowerThreshold = "30"
+        XCTAssertTrue(model.dirty)
+        model.upperThreshold = "20"
+        XCTAssertNotNil(model.validation)
+        model.repairingRuntime = true
+        XCTAssertFalse(model.canSave)
+    }
     @MainActor
     func testNativeEditingShortcutsUseTheFirstResponderAndAutomaticValidation() {
         let menu = NativeEditingMenu.make()

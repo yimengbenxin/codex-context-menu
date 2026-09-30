@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export function modelBounds(catalog, model) {
+export function modelBounds(catalog, model, options = {}) {
   const matches = catalog.models?.filter(entry => entry.slug === model) ?? [];
   if (matches.length !== 1) throw new Error('Selected model has no unique official metadata');
   const entry = matches[0];
@@ -10,15 +10,31 @@ export function modelBounds(catalog, model) {
   const percent = entry.effective_context_window_percent;
   if (![initial, maximum, percent].every(Number.isSafeInteger) || initial <= 0 || maximum < initial || percent <= 0 || percent > 100)
     throw new Error('Selected model has invalid official context bounds');
-  return {model, tiers: [...new Set([initial, Math.floor((initial + maximum) / 2), maximum])], percent};
+  const lower = options.lower_percent ?? 45;
+  const upper = options.upper_percent ?? 65;
+  if (![lower, upper].every(Number.isFinite) || lower < 0 || lower >= upper || upper > 100)
+    throw new Error('Adaptive thresholds must satisfy 0 <= lower < upper <= 100');
+  const provided = options.tiers ?? [null, null, null];
+  if (!Array.isArray(provided) || provided.length !== 3) throw new Error('Adaptive policy requires three tiers');
+  const bounded = (tier, fallback) => {
+    if (tier === null) return fallback;
+    if (!Number.isSafeInteger(tier) || tier <= 0) throw new Error('Adaptive tiers must be positive integers');
+    return Math.min(tier, maximum);
+  };
+  const first = bounded(provided[0], initial);
+  const last = bounded(provided[2], maximum);
+  const tiers = [first, bounded(provided[1], Math.floor((first + last) / 2)), last];
+  if (tiers.some((tier, index) => index > 0 && tier < tiers[index - 1]))
+    throw new Error('Adaptive tiers must be ordered after applying official bounds');
+  return {model, tiers: [...new Set(tiers)], maximum, percent, thresholds: {lower: lower / 100, upper: upper / 100}};
 }
 
 export function feedback(bounds, state, retained, successful, manual) {
   const next = {...state};
   if (!successful || manual || !Number.isSafeInteger(retained) || retained < 0) return next;
   const ratio = retained / next.budget;
-  if (ratio < 0.45) next.ambiguous = 0;
-  else if (ratio >= 0.65 || (next.ambiguous = (next.ambiguous ?? 0) + 1) >= 2) {
+  if (ratio < bounds.thresholds.lower) next.ambiguous = 0;
+  else if (ratio >= bounds.thresholds.upper || (next.ambiguous = (next.ambiguous ?? 0) + 1) >= 2) {
     next.budget = bounds.tiers.find(tier => tier > next.budget) ?? next.budget;
     next.ambiguous = 0;
   }

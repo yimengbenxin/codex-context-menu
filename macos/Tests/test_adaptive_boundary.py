@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import sqlite3
 import sys
+import hashlib
 from aiohttp import web, WSMsgType
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +16,7 @@ RESOURCES = Path(os.environ.get("CODEX_CONTEXT_TEST_RESOURCES", str(ROOT / "maco
 MODEL = "gpt-6.1-sol"
 captured = []
 force_large_turns = 0
+force_large_tokens = 260000
 
 
 def events(body):
@@ -32,7 +34,7 @@ def events(body):
     ordinary_count = sum(request["kind"] == "turn" and not request["compact"] for request in captured)
     tokens = 260000 if ordinary_count == 1 and kind == "turn" and not compact else 190000
     if force_large_turns and kind == "turn" and not compact:
-        tokens = 260000
+        tokens = force_large_tokens
         force_large_turns -= 1
     return [
         {"type": "response.created", "response": {"id": "fixture-response"}},
@@ -101,7 +103,7 @@ class Rpc:
 
 
 async def run():
-    global force_large_turns
+    global force_large_turns, force_large_tokens
     result = {"passed": False, "scope": "signed official runtime with local synthetic responses",
               "main_modified": False, "desktop_tools_tested": False, "real_quality_tested": False}
     application = web.Application()
@@ -138,8 +140,20 @@ remote_compaction_v2 = true
 trust_level = "trusted"
 ''')
         environment = {"HOME": str(directory / "home"), "CODEX_HOME": str(home),
+            "CODEX_CONTEXT_OFFICIAL_BINARY": os.environ.get("CODEX_CONTEXT_TEST_BINARY", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
             "CODEX_CONTEXT_PYTHON": str(PYTHON), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
             "TMPDIR": temporary, "NO_PROXY": "localhost,127.0.0.1,::1"}
+        support = directory / "home/Library/Application Support/CodexContextTool"
+        support.mkdir(parents=True)
+        adaptive = RESOURCES / "adaptive"
+        files = {os.path.relpath(file, adaptive): hashlib.sha256(file.read_bytes()).hexdigest()
+            for file in [*adaptive.glob("*"), RESOURCES / "context_config.py", RESOURCES / "thread_settings.py", RESOURCES / "adaptive_settings.py"] if file.is_file()}
+        manifest = {"accepted": True, "contract": "round-boundary-v1", "files": files, "python": str(PYTHON),
+            "binary": environment["CODEX_CONTEXT_OFFICIAL_BINARY"], "node": NODE,
+            "officialSha256": hashlib.sha256(Path(environment["CODEX_CONTEXT_OFFICIAL_BINARY"]).read_bytes()).hexdigest(),
+            "nodeSha256": hashlib.sha256(Path(NODE).read_bytes()).hexdigest()}
+        (support / "official-adaptive-runtime.json").write_text(json.dumps(manifest))
+        (support / "backend").symlink_to(adaptive / "backend")
         with OUTPUT.with_suffix(".stderr.log").open("wb") as log:
             async def start():
                 nonlocal process
@@ -262,6 +276,45 @@ trust_level = "trusted"
                     "sibling_and_fork": 600000 * percent // 100, "reset_inherits_project": True,
                     "custom_restart": True, "adaptive_windows": private_windows, "adaptive_restart": True,
                     "project_config_unchanged": True, "history_preserved": True, "database_integrity": True}
+                configured_project = directory / "configured-project"
+                configured_project.mkdir()
+                global_config.write_text(global_config.read_text() + f'\n[projects.{json.dumps(str(configured_project))}]\ntrust_level = "trusted"\n')
+                configurable_options = json.dumps({"lower_percent": 30, "upper_percent": 50, "tiers": [320000, 550000, 800000]})
+
+                async def update_policy(mode, value=""):
+                    async def invoke(*arguments):
+                        command = await asyncio.create_subprocess_exec(str(PYTHON), "-B", str(RESOURCES / "context_config.py"),
+                            *arguments, env=environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                        output, errors = await command.communicate()
+                        assert command.returncode == 0, errors.decode()
+                        return json.loads(output)
+                    current = await invoke("status", str(configured_project))
+                    return await invoke("save", str(configured_project), value, current["revision"], mode, configurable_options)
+
+                original_adaptive = await update_policy("adaptive")
+                configured = await rpc.request("thread/start", {"model": MODEL, "cwd": str(configured_project),
+                    "approvalPolicy": "never", "sandbox": "read-only"})
+                configured_id = configured["thread"]["id"]
+                force_large_tokens = 300000
+                force_large_turns = 1
+                configured_windows = [await rpc.turn(configured_id) for _ in range(3)]
+                assert configured_windows == [320000 * percent // 100, 320000 * percent // 100, 550000 * percent // 100], configured_windows
+                await update_policy("custom", "485")
+                assert await rpc.turn(configured_id) == 485000 * percent // 100
+                returned_adaptive = await update_policy("adaptive")
+                assert returned_adaptive["revision"] != original_adaptive["revision"]
+                reset_window = await rpc.turn(configured_id)
+                assert reset_window == 320000 * percent // 100, reset_window
+                await stop()
+                rpc = await start()
+                await rpc.request("thread/resume", {"threadId": configured_id})
+                assert await rpc.turn(configured_id) == reset_window
+                for database in home.glob("state_*.sqlite"):
+                    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+                        assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                result["configurable_policy"] = {"thresholds": [30, 50], "tiers": [320000, 550000, 800000],
+                    "observed_windows": configured_windows, "custom_return_initial": reset_window, "reset_survives_restart": True,
+                    "database_integrity": True}
                 result["passed"] = True
             except Exception as error:
                 result["error"] = f"{type(error).__name__}: {error}"

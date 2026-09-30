@@ -64,7 +64,7 @@ class ThreadSettingsTests(unittest.TestCase):
         self.assertEqual((self.home / "config.toml").read_bytes(), self.global_before)
 
     def test_adaptive_and_untrusted_save_contract(self):
-        with patch.dict(os.environ, {"CODEX_HOME": str(self.home)}), patch.object(backend, "adaptive_available", return_value=True):
+        with patch.dict(os.environ, {"CODEX_HOME": str(self.home)}), patch.object(backend, "adaptive_status", return_value={"adaptive": True}):
             project = backend.status(self.root)
             current = backend.thread_status(project, FIRST, backend.read_config, backend.revision)
             saved = backend.save_thread(project, FIRST, "", current["revision"], "adaptive",

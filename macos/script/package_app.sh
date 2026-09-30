@@ -7,7 +7,7 @@ BUNDLE_ID="local.wen.CodexContextMenu"
 MIN_SYSTEM_VERSION="14.0"
 ARCH="$(uname -m)"
 CONFIGURATION="release"
-VERSION="0.6.4"
+VERSION="0.6.5"
 OUTPUT_DIR=""
 
 usage() {
@@ -186,8 +186,10 @@ cp -X "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 cp "$ROOT_DIR/README.md" "$RESOURCES_DIR/README.md"
 cp "$ROOT_DIR/README.zh-CN.md" "$RESOURCES_DIR/README.zh-CN.md"
+cp "$ROOT_DIR/README.en.md" "$RESOURCES_DIR/README.en.md"
 cp "$ROOT_DIR/LICENSE" "$RESOURCES_DIR/LICENSE"
 cp -R "$MACOS_DIR/Resources/." "$RESOURCES_DIR/"
+cp -X "$MACOS_DIR/script/install_local.py" "$RESOURCES_DIR/install_local.py"
 find "$RESOURCES_DIR" -type f -name '*.pyc' -delete
 find "$RESOURCES_DIR" -depth -type d -name '__pycache__' -exec rmdir {} +
 cp "$ROOT_DIR/CONTEXT_MENU.md" "$RESOURCES_DIR/CONTEXT_MENU.md"

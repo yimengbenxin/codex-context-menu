@@ -15,6 +15,8 @@ struct ProjectContextStatus: Decodable, Sendable {
     let compact: Int64?
     let adaptive: Bool
     let adaptive_available: Bool
+    let adaptive_reason: String?
+    let adaptive_options: AdaptiveOptions?
     let trusted: Bool
     let inherited: [Inherited]
     let scope: String?
@@ -22,14 +24,21 @@ struct ProjectContextStatus: Decodable, Sendable {
 }
 
 enum ContextBackend {
-    static func run(_ arguments: [String]) throws -> ProjectContextStatus {
+    static func python() throws -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = ["\(home)/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        let candidates = [ProcessInfo.processInfo.environment["CODEX_CONTEXT_PYTHON"] ?? "",
+                          "\(home)/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
                           "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
-        guard let python = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }),
-              let script = Bundle.main.path(forResource: "context_config", ofType: "py") else {
-            throw NSError(domain: "Context", code: 1, userInfo: [NSLocalizedDescriptionKey: "需要 Python 3.11+，或 Codex 自带的 Python 运行时。"])
+        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+            if let data = try? LocalCommand.run(candidate, ["-c", "import sys; print(sys.version_info >= (3, 11))"], timeout: 5),
+               String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "True" { return candidate }
         }
+        throw NSError(domain: "Context", code: 1, userInfo: [NSLocalizedDescriptionKey: "需要 Python 3.11+，或 Codex 自带的 Python 运行时。"])
+    }
+
+    static func run(_ arguments: [String]) throws -> ProjectContextStatus {
+        let python = try python()
+        guard let script = Bundle.main.path(forResource: "context_config", ofType: "py") else { throw FocusedContextTarget.failure("应用资源不完整，请重新下载。") }
         let data = try LocalCommand.run(python, ["-B", script] + arguments)
         return try JSONDecoder().decode(ProjectContextStatus.self, from: data)
     }
@@ -39,6 +48,13 @@ enum ContextTarget {
     struct Located: Sendable {
         let project: String
         let threadID: String
+    }
+
+    static func locate(focusedTitle: String?, sessionRoots: [String]? = nil,
+                       databasePath: String = SessionPathResolver.resolveCodexHome() + "/state_5.sqlite") throws -> Located {
+        guard let focusedTitle else { throw FocusedContextTarget.failure("需要辅助功能权限才能核对窗口焦点。请授权后识别，或粘贴深度链接；不会按后台订阅猜目标。") }
+        let identifier = try FocusedContextTarget.threadID(title: focusedTitle, databasePath: databasePath)
+        return try locate(link: "codex://threads/\(identifier)", sessionRoots: sessionRoots, requireDesktopRoot: true)
     }
 
     static func threadID(link: String) throws -> String {
@@ -104,11 +120,11 @@ final class ContextSettingsController: NSObject, NSWindowDelegate {
     private var windowController: NSWindowController?
     private var pickerOpen = false
 
-    func present(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64? = nil, origin: ContextTargetOrigin = .link) {
+    func present(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64? = nil, origin: ContextTargetOrigin = .link, title: String? = nil) {
         showWindow()
         guard !model.saving else { return }
         model.page = .context
-        model.load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, origin: origin)
+        model.load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, origin: origin, title: title)
     }
 
     func chooseProject() {

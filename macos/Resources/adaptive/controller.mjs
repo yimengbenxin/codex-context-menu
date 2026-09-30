@@ -49,15 +49,15 @@ export class AdaptiveController {
     if (!cwd || !model) return null;
     const settings = await this.settings(cwd, threadID);
     if (!settings.trusted) return null;
-    const bounds = modelBounds(this.catalog(), model);
     const key = `${settings.root}\u0000${model}${settings.override ? `\u0000${threadID}` : ''}`;
     const effective = await this.request('config/read', {cwd, includeLayers: false});
     const adaptive = settings.override ? settings.adaptive : settings.effective_adaptive ?? settings.adaptive;
+    const bounds = modelBounds(this.catalog(), model, adaptive ? settings.adaptive_options : undefined);
     const revision = settings.override ? settings.revision : settings.project_revision ?? settings.revision;
     const state = adaptive ? this.store.get(key, revision, bounds) : null;
     const budget = state?.budget ?? (settings.override ? settings.window : effective.config.model_context_window) ?? null;
     const compact = effective.config.model_auto_compact_token_limit ?? null;
-    const expected = Math.floor(Math.min(budget ?? bounds.tiers[0], bounds.tiers.at(-1)) * bounds.percent / 100);
+    const expected = Math.floor(Math.min(budget ?? bounds.tiers[0], bounds.maximum) * bounds.percent / 100);
     return {key, root: settings.root, revision, bounds, state,
       adaptive, budget, compact, expected, signature: JSON.stringify([budget, compact])};
   }

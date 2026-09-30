@@ -25,7 +25,7 @@ enum ContextScope: String, CaseIterable, Identifiable {
 }
 
 enum ContextTargetOrigin: String {
-    case automatic = "自动识别", link = "深度链接", manual = "手动选择"
+    case focused = "窗口焦点", link = "深度链接", manual = "手动选择"
 }
 
 enum ContextActivationCopy {
@@ -41,11 +41,17 @@ final class ContextSettingsModel: ObservableObject {
     @Published var status: ProjectContextStatus?
     @Published var mode: ContextMode = .default
     @Published var input = ""
+    @Published var lowerThreshold = "45"
+    @Published var upperThreshold = "65"
+    @Published var tierInputs = ["", "", ""]
+    @Published var repairingRuntime = false
+    @Published var runtimeReason: String?
     @Published var loading = false
     @Published var saving = false
     @Published var error: String?
     @Published var feedback: String?
     @Published var threadID: String?
+    @Published var threadTitle: String?
     @Published var observedWindow: Int64?
     @Published var observedTarget: Int64?
     @Published var integrationPending = false
@@ -53,12 +59,21 @@ final class ContextSettingsModel: ObservableObject {
     @Published var targetLink = ""
     @Published var identifying = false
     @Published var targetVerificationFailed = false
+    @Published var focusPermissionRequired = false
     @Published var targetOrigin: ContextTargetOrigin = .manual
     private var generation = UUID()
     private var savedMode: ContextMode = .default
     private var savedInput = ""
+    private var savedAdaptive = AdaptiveOptions()
+
+    func adaptiveOptions() throws -> AdaptiveOptions {
+        try AdaptiveOptions.parse(lower: lowerThreshold, upper: upperThreshold, tiers: tierInputs)
+    }
 
     var validation: String? {
+        if mode == .adaptive {
+            do { _ = try adaptiveOptions(); return nil } catch { return error.localizedDescription }
+        }
         guard mode == .custom else { return nil }
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.isEmpty { return nil }
@@ -69,20 +84,22 @@ final class ContextSettingsModel: ObservableObject {
         }
         return nil
     }
-    var dirty: Bool { mode != savedMode || (mode == .custom && input != savedInput) }
+    var dirty: Bool { mode != savedMode || (mode == .custom && input != savedInput) || (mode == .adaptive && (try? adaptiveOptions()) != savedAdaptive) }
     var canSave: Bool {
-        status?.trusted == true && !loading && !saving && !identifying && !targetVerificationFailed && validation == nil && (dirty || integrationPending)
+        status?.trusted == true && !loading && !saving && !identifying && !repairingRuntime && !targetVerificationFailed && validation == nil && (dirty || integrationPending)
             && (mode != .adaptive || status?.adaptive_available == true)
             && (scope != .thread || (threadID != nil && status?.adaptive_available == true))
     }
 
-    func load(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64?, scope: ContextScope? = nil, origin: ContextTargetOrigin? = nil) {
+    func load(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64?, scope: ContextScope? = nil, origin: ContextTargetOrigin? = nil, title: String? = nil) {
         guard !saving else { return }
         let request = UUID()
         generation = request
         self.project = project
         self.threadID = threadID
+        self.threadTitle = threadID == nil ? nil : title
         targetVerificationFailed = false
+        focusPermissionRequired = false
         targetOrigin = threadID == nil ? .manual : (origin ?? targetOrigin)
         self.scope = threadID == nil ? .project : (scope ?? .thread)
         let arguments = self.scope == .thread ? ["thread-status", project, threadID!] : ["status", project]
@@ -115,12 +132,12 @@ final class ContextSettingsModel: ObservableObject {
 
     func selectScope(_ selected: ContextScope) {
         guard let project, !saving, !loading, !identifying else { return }
-        load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, scope: selected)
+        load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, scope: selected, title: threadTitle)
     }
 
     func reload() {
         guard let project, !saving else { return }
-        load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, scope: scope)
+        load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, scope: scope, title: threadTitle)
     }
 
     private func adopt(_ result: ProjectContextStatus) {
@@ -130,6 +147,48 @@ final class ContextSettingsModel: ObservableObject {
         input = result.window.map { String($0 / 1000) } ?? ""
         savedMode = mode
         savedInput = input
+        savedAdaptive = result.adaptive_options ?? AdaptiveOptions()
+        lowerThreshold = String(savedAdaptive.lower_percent)
+        upperThreshold = String(savedAdaptive.upper_percent)
+        tierInputs = savedAdaptive.tiers.map { $0.map { String($0 / 1000) } ?? "" }
+        runtimeReason = result.adaptive_available ? nil : result.adaptive_reason ?? "运行组件未完成接入。"
+    }
+
+    func inspectRuntime() {
+        let backend = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/CodexContextTool/backend").path
+        guard FileManager.default.isExecutableFile(atPath: backend) else { runtimeReason = "尚未完成组件接入。拖入应用后，请在这里完成一次接入；重启不会补装组件。"; return }
+        if URL(fileURLWithPath: backend).resolvingSymlinksInPath().deletingLastPathComponent().deletingLastPathComponent()
+            != Bundle.main.resourceURL?.resolvingSymlinksInPath() {
+            runtimeReason = "运行组件属于另一份应用安装，请为当前应用完成接入 / 重新验证。"
+            return
+        }
+        Task {
+            do {
+                let data = try await Task.detached { try LocalCommand.run(backend, ["--context-capability"]) }.value
+                let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                runtimeReason = result?["adaptive"] as? Bool == true ? nil : result?["reason"] as? String ?? "请重新验证组件接入。"
+            } catch { runtimeReason = "组件检查未完成，请重新验证接入。" }
+        }
+    }
+
+    func repairRuntime() {
+        guard !repairingRuntime, !saving, !loading, !identifying else { return }
+        guard !Bundle.main.bundleURL.path.hasPrefix("/Volumes/") else { error = "请先把应用拖入 Applications，再从应用目录打开并完成接入。"; return }
+        repairingRuntime = true
+        error = nil
+        Task {
+            defer { repairingRuntime = false }
+            do {
+                let bundle = Bundle.main.bundleURL.path
+                guard let script = Bundle.main.path(forResource: "install_local", ofType: "py") else { throw FocusedContextTarget.failure("安装资源缺失，请重新下载完整应用。") }
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try LocalCommand.run(ContextBackend.python(), ["-B", script, bundle, "--integrate-only"], timeout: 150)
+                }.value
+                runtimeReason = nil
+                if project != nil { reload() }
+                feedback = "组件接入完成。首次接入或更新运行组件后，请完整重启 Codex 一次；不是每个对话都要重启。"
+            } catch { self.error = error.localizedDescription }
+        }
     }
 
     func save() {
@@ -138,9 +197,11 @@ final class ContextSettingsModel: ObservableObject {
         let revision = status.revision
         let selectedMode = mode.rawValue
         let value = mode == .custom ? input : ""
+        let options = (try? adaptiveOptions()) ?? savedAdaptive
+        guard let encoded = try? JSONEncoder().encode(options), let adaptiveJSON = String(data: encoded, encoding: .utf8) else { return }
         let arguments = scope == .thread && threadID != nil
-            ? ["thread-save", root, threadID!, value, revision, selectedMode]
-            : ["save", root, value, revision, selectedMode]
+            ? ["thread-save", root, threadID!, value, revision, selectedMode, adaptiveJSON]
+            : ["save", root, value, revision, selectedMode, adaptiveJSON]
         saving = true
         error = nil
         feedback = nil

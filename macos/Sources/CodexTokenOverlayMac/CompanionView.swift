@@ -78,9 +78,20 @@ struct ContextSettingsView: View {
                         Text("上下文设置").font(.system(size: 26, weight: .semibold))
                         Text("选择策略，让上下文跟上你的任务。").foregroundStyle(.secondary)
                     }
+                    if let reason = model.runtimeReason {
+                        VStack(alignment: .leading, spacing: 10) {
+                            InlineMessage(text: reason, symbol: "gearshape", color: .orange)
+                            Button(model.repairingRuntime ? "正在检查并接入…" : "完成组件接入 / 重新验证") { model.repairRuntime() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.repairingRuntime || model.saving || model.loading || model.identifying)
+                            Text("只复制 .app 不等于已接入。这里会检查官方协议并安装本工具的运行组件，不改官方应用或聊天记录。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Button(action: identify) { Label("识别当前对话", systemImage: "scope") }
+                                .help("读取 Codex 当前或最近选中的窗口标题，精确匹配对话。需辅助功能权限；不读取聊天正文。")
                                 .buttonStyle(.borderedProminent)
                             Button("手动选择项目…", action: chooseProject)
                             if model.identifying { ProgressView().controlSize(.small) }
@@ -136,6 +147,11 @@ struct ContextSettingsView: View {
                         }
                     }
                 }
+                if model.focusPermissionRequired {
+                    Button("打开辅助功能设置…") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                    }
+                }
                 if let feedback = model.feedback, !model.dirty { InlineMessage(text: feedback, symbol: "checkmark.circle", color: .green) }
                 HStack {
                     Text(model.saving ? "正在保存设置…" : (model.loading ? "正在读取设置…" : (model.dirty ? "更改尚未保存" : "没有待保存的更改")))
@@ -166,6 +182,9 @@ struct ContextSettingsView: View {
                 }
             }
             if model.threadID != nil {
+                if let title = model.threadTitle {
+                    Text(title).font(.headline).lineLimit(2).textSelection(.enabled).help(title)
+                }
                 Text("定位来源：\(model.targetOrigin.rawValue)").font(.caption).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: 12) {
@@ -207,14 +226,24 @@ struct ContextSettingsView: View {
                     else { Text(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "留空保存，将清除当前范围的覆盖并继承默认。" : "1 K = 1,000 tokens。最终窗口以运行反馈为准。")
                         .font(.caption).foregroundStyle(.secondary) }
                 } else if model.mode == .adaptive {
-                    HStack(spacing: 9) {
-                        Text("官方初始档")
-                        Image(systemName: "arrow.right")
-                        Text("中间档")
-                        Image(systemName: "arrow.right")
-                        Text("官方上限")
+                    HStack(alignment: .top, spacing: 16) {
+                        adaptiveField("两次触发线（%）", input: $model.lowerThreshold, placeholder: "45")
+                        adaptiveField("一次触发线（%）", input: $model.upperThreshold, placeholder: "65")
                     }
-                    .font(.caption).foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(0..<3) { index in
+                            adaptiveField(["初始档（K）", "中间档（K）", "上限档（K）"][index],
+                                input: $model.tierInputs[index], placeholder: ["官方初始值", "初始与上限中点", "官方上限"][index])
+                        }
+                    }
+                    Text("初始与上限留空跟随官方；中间档留空取当前初始与上限的算术中点。输入值仍受官方模型上限约束。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("从自定义切回自适应，会从初始档重新开始，不沿用自定义数值或历史升档。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("恢复默认阈值与官方档位") {
+                        model.lowerThreshold = "45"; model.upperThreshold = "65"; model.tierInputs = ["", "", ""]
+                    }.disabled(model.saving || model.repairingRuntime)
+                    if let validation = model.validation { InlineMessage(text: validation, symbol: "exclamationmark.circle", color: .red) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -222,11 +251,18 @@ struct ContextSettingsView: View {
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.mode)
             if !status.trusted { InlineMessage(text: "此项目尚未受信任。请先在 Codex 中打开并信任，然后重新选择。", symbol: "lock", color: .orange) }
-            if !status.adaptive_available { InlineMessage(text: model.scope == .thread ? "对话级组件需升级或重新验证，当前不能保存；项目级默认与自定义仍可使用。" : "热加载组件未验证或需升级；项目级默认与自定义仍可保存，重启后生效。", symbol: "info.circle", color: .secondary) }
             if !status.inherited.isEmpty {
                 InlineMessage(text: "项目、上级或全局仍有上下文覆盖；恢复默认会继承它们。", symbol: "info.circle", color: .orange)
             }
         }
+    }
+
+    private func adaptiveField(_ title: String, input: Binding<String>, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            TextField(placeholder, text: input).textFieldStyle(.roundedBorder).accessibilityLabel(title)
+                .disabled(model.saving || model.repairingRuntime)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func activation(_ status: ProjectContextStatus) -> some View {

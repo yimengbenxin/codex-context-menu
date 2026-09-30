@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import uuid
+import adaptive_settings
 
 
 def settings_path(thread_id):
@@ -41,11 +42,13 @@ def thread_status(project, thread_id, read_config, revision):
             "thread": thread_id.lower(), "override": entry is not None,
             "effective_adaptive": project["adaptive"], "project_revision": project["revision"],
             "window": entry.get("window") if entry else None,
+            "adaptive_options": adaptive_settings.options(entry.get("adaptive_options", project.get("adaptive_options"))) if entry else project.get("adaptive_options", adaptive_settings.options()),
+            "adaptive_activation": entry.get("adaptive_activation") if entry else None,
             "compact": None, "adaptive": entry is not None and entry["mode"] == "adaptive",
             "inherited": inherited}
 
 
-def save_thread(project, thread_id, value, expected, mode, read_config, revision, parse_k):
+def save_thread(project, thread_id, value, expected, mode, read_config, revision, parse_k, adaptive_raw=None):
     if mode not in ("default", "custom", "adaptive"):
         raise ValueError("不支持的上下文模式。")
     if not project["trusted"]:
@@ -65,7 +68,9 @@ def save_thread(project, thread_id, value, expected, mode, read_config, revision
             if path.exists():
                 path.unlink()
         else:
-            entry = {"root": project["root"], "thread": thread_id.lower(), "mode": mode, "window": tokens}
+            entry = {"root": project["root"], "thread": thread_id.lower(), "mode": mode, "window": tokens,
+                "adaptive_options": adaptive_settings.options(adaptive_raw) if adaptive_raw is not None else current["adaptive_options"],
+                "adaptive_activation": current["adaptive_activation"] if mode != "adaptive" or current["adaptive"] else str(uuid.uuid4())}
             temporary_descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".settings-")
             try:
                 with os.fdopen(temporary_descriptor, "w") as output:

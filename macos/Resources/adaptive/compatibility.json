@@ -1,8 +1,12 @@
 {
-  "release": "0.6.4",
-  "officialVersion": "0.159.2",
-  "officialSha256": "50ac633af64851511f9bbc71032cdae7f1ba20b3234c189687d61ba846c354c5",
-  "nodeSha256": "585821f92da83ee4ac9eb5557fee03ce286130b61d93efbcc9ca0de2cb1a9e77",
+  "release": "0.6.5",
+  "compatibilityMode": "signed-protocol-capability",
+  "verifiedVersions": ["0.159.0", "0.159.2"],
+  "referenceRuntime": {
+    "officialVersion": "0.159.2",
+    "officialSha256": "50ac633af64851511f9bbc71032cdae7f1ba20b3234c189687d61ba846c354c5",
+    "nodeSha256": "585821f92da83ee4ac9eb5557fee03ce286130b61d93efbcc9ca0de2cb1a9e77"
+  },
   "officialLayout": "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app and cua_node/bin/node",
   "scope": "native synthetic lifecycle, main custom next-turn changes, desktop tools; not real long-history adaptive acceptance"
 }

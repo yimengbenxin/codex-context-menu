@@ -8,12 +8,18 @@ if CommandLine.arguments.contains("--diagnose") {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     }
     let route = monitor.status()
+    let selection = try? MainActor.assumeIsolated {
+        let focus = try FocusedContextTarget.capture()
+        return (try ContextTarget.locate(focusedTitle: focus?.title), focus?.title)
+    }
+    let target = selection?.0
     let logs = TokenLogMonitor()
-    logs.preferredThreadID = route.activeWindowCount == 1 ? route.threadID : nil
+    logs.preferredThreadID = target?.threadID
     let snapshot = logs.poll(forceFullScan: true)
-    let matched = route.isConnected && route.activeWindowCount == 1 && snapshot?.threadID == route.threadID
+    let matched = target != nil && snapshot?.threadID == target?.threadID
     var result: [String: Any] = ["connected": route.isConnected, "activeWindows": route.activeWindowCount,
-                               "verifiedCurrentThread": matched, "thread": route.threadID ?? ""]
+                               "verifiedCurrentThread": matched, "thread": target?.threadID ?? "",
+                               "subscriptionThread": route.threadID ?? "", "focusedTitle": selection?.1 ?? ""]
     if matched, let snapshot {
         result["project"] = try? ContextTarget.project(logPath: snapshot.logPath, threadID: snapshot.threadID)
         result["runtimeWindow"] = snapshot.contextWindowTokens

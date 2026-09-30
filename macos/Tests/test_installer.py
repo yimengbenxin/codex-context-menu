@@ -13,13 +13,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "Resources"))
+
 SCRIPT = Path(__file__).resolve().parents[1] / "script/install_local.py"
 OFFICIAL = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
 NODE = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
 
 
 class InstallerTests(unittest.TestCase):
-    def exercise(self, fail=False):
+    def exercise(self, fail=False, integrate_only=False, preserve_window=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             home = root / "fresh-home"
@@ -35,6 +37,8 @@ class InstallerTests(unittest.TestCase):
                 "nodeSha256": hashlib.sha256(fixtures[NODE]).hexdigest()}))
             support = home / "Library/Application Support/CodexContextTool"
             application = home / "Applications/CodexContextMenu.app"
+            if integrate_only:
+                application = candidate.resolve()
             agent = home / "Library/LaunchAgents/local.wen.CodexContextMenu.plist"
             if fail:
                 shutil.copytree(candidate, application)
@@ -61,7 +65,10 @@ class InstallerTests(unittest.TestCase):
                 return subprocess.CompletedProcess(arguments, 0, stdout=output, stderr="")
 
             with patch.dict(os.environ, {"HOME": str(home), "CODEX_HOME": str(home / ".codex")}), \
-                 patch.object(sys, "argv", [str(SCRIPT), str(candidate)]), \
+                 patch.object(sys, "argv", [str(SCRIPT), str(candidate)] + (["--integrate-only"] if integrate_only else []) + (["--preserve-window"] if preserve_window else [])), \
+                 patch("runtime_probe.locate", return_value={"binary": OFFICIAL, "node": NODE,
+                     "contract": "round-boundary-v1", "version": "fixture 0.159.0", "officialSha256": hashlib.sha256(fixtures[OFFICIAL]).hexdigest(),
+                     "nodeSha256": hashlib.sha256(fixtures[NODE]).hexdigest()}), \
                  patch.object(Path, "read_bytes", read), patch.object(Path, "is_file", is_file), \
                  patch.object(subprocess, "run", command), contextlib.redirect_stdout(io.StringIO()):
                 if fail:
@@ -81,14 +88,21 @@ class InstallerTests(unittest.TestCase):
                 config = plistlib.loads(agent.read_bytes())
                 self.assertTrue(config["RunAtLoad"])
                 self.assertEqual(config["ProgramArguments"][0], str(application / "Contents/MacOS/CodexTokenOverlayMac"))
+                self.assertEqual(config["ProgramArguments"][1], "--background")
                 self.assertTrue((support / "backend").is_symlink())
                 self.assertTrue((support / "installation.json").exists())
                 manifest = json.loads((support / "official-adaptive-runtime.json").read_text())
                 self.assertNotIn("nativeEvidence", manifest)
                 self.assertNotIn("desktopEvidence", manifest)
+                if preserve_window:
+                    self.assertFalse(any("bootstrap" in call or "/usr/bin/open" in call for call in calls))
 
     def test_fresh_home_install_without_private_acceptance_files(self):
         self.exercise()
 
     def test_activation_failure_restores_previous_app_manifest_and_agent(self):
         self.exercise(fail=True)
+
+    def test_dragged_app_can_complete_runtime_integration_without_copying_it_again(self):
+        self.exercise(integrate_only=True)
+        self.exercise(preserve_window=True)

@@ -102,7 +102,7 @@ class ContextConfigTests(unittest.TestCase):
 
     def test_three_modes_clear_only_owned_keys(self):
         self.store('model_context_window = 485000\n[features]\nremote_compaction_v2 = true\n')
-        with patch.object(backend, "adaptive_available", return_value=True):
+        with patch.object(backend, "adaptive_status", return_value={"adaptive": True}):
             current = backend.status(self.root)
             adaptive = backend.save(self.root, "invalid ignored input", current["revision"], "adaptive")
             self.assertTrue(adaptive["adaptive"])
@@ -118,14 +118,14 @@ class ContextConfigTests(unittest.TestCase):
 
     def test_unverified_adaptive_does_not_write(self):
         current = backend.status(self.root)
-        with patch.object(backend, "adaptive_available", return_value=False), self.assertRaises(ValueError):
+        with patch.object(backend, "adaptive_status", return_value={"adaptive": False}), self.assertRaises(ValueError):
             backend.save(self.root, "", current["revision"], "adaptive")
         self.assertFalse(self.config.exists())
 
     def test_adaptive_conflicts_preserve_existing_settings(self):
         self.store('[features]\ntoken_budget = true\n')
         original = self.config.read_bytes()
-        with patch.object(backend, "adaptive_available", return_value=True), self.assertRaises(ValueError):
+        with patch.object(backend, "adaptive_status", return_value={"adaptive": True}), self.assertRaises(ValueError):
             backend.save(self.root, "", backend.status(self.root)["revision"], "adaptive")
         self.assertEqual(self.config.read_bytes(), original)
 
