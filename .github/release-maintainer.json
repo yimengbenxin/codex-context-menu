@@ -4,7 +4,7 @@
   "remote": "origin",
   "branch": "main",
   "tag_template": "v{version}",
-  "title_template": "Codex Context Menu {version} — macOS experimental",
+  "title_template": "Codex 上下文 {version} · macOS 试用版",
   "release_notes_file": "docs/RELEASE_NOTES_{version}.md",
   "verify_commands": [
     {"argv": ["swift", "test", "--package-path", "macos"], "timeout": 300},

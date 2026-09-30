@@ -1,23 +1,68 @@
-# 0.6.4 · experimental macOS release
+# Codex 上下文 0.6.4 · macOS 试用版
 
-First public snapshot of the native context companion. Released 2026-09-30.
+发布日期：2026-09-30。首次公开发布的原生 macOS 上下文伴随工具，无需在聊天里发送设置指令。**非 OpenAI 官方产品；本版本为实验性试用版，兼容范围有限。**
 
-## Shipped
+## 本次发布了什么
 
-- Default, custom integer-K and adaptive policies, with explicit conversation/project scope.
-- Exact local deep-link resolution and first-responder Command+V / Command+A editing.
-- Idle next-turn changes using the signed official CLI's native cache reconstruction.
-- Local Token reporting and opt-in official quota access through pinned CodexBar CLI.
-- Installer preflight, per-user installation, backups and failure rollback without private QA files.
+- **官方默认 / 自适应 / 自定义**三种策略：默认不写死数值；自定义以整数 K 输入，留空清除覆盖。
+- **明确的对话级与项目级范围**：识别当前本地对话，或粘贴 `codex://threads/<UUID>` 精确定位，避免仅靠文件夹选错对话。
+- **原生粘贴与编辑**：支持 ⌘V 粘贴、⌘A 全选等系统操作，修复链接框不能正常粘贴的问题。
+- **下一轮加载设置**：使用未修改的官方签名后端，在两轮对话之间加载预算，不打断当前回复。
+- **用量概览**：本地近七天 Token 统计，以及手动读取官方账户额度；自动额度刷新默认关闭。
+- **可分发安装包**：ZIP / DMG、安装前兼容检查、用户级安装、备份与失败回滚、启动环境恢复。
 
-## Compatibility and installation
+不包含换模型压缩或修改压缩推理强度；压缩仍由 Codex 官方后端处理。
 
-Only macOS 14+ Apple Silicon, Python 3.11+, the pinned official 0.159.2 CLI/Node hashes and the documented ChatGPT.app layout are supported. Double-click Install.command from the ZIP or DMG. Initial integration requires one full Codex restart. This is ad-hoc signed, not notarized. Verify SHA-256 before approving system trust prompts.
+## 自适应规则
 
-## Verification and limits
+档位来自官方元数据：初始值、初始值与上限的算术中间值、官方上限，不固定为某三个 K 值。
 
-22 Swift, 23 Node, 11 project and 3 thread configuration checks passed; installer lifecycle fixtures and signed-package preflight are additional checks. Native synthetic-response lifecycle tests preserve history prefixes and SQLite integrity. Live desktop custom-budget changes and genuine desktop tools were exercised. Cache reuse may transiently drop during a reload; zero-cost switching is not promised.
+自动压缩成功后，保留比例 ≥65% 升一档；≥45% 且 <65% 连续两次满足条件后升一档；<45% 重置计数。手动或失败压缩不升档。新档位在下一轮加载，不必等下一次压缩。
 
-Long-history adaptive promotion is not fully accepted. Dock-first behavior and direct menu-bar mode selection/double-click activation are deferred to a later release. ZIP/DMG include the same app and installer, not user state or the official/Python runtimes.
+自定义切回自适应，恢复同一范围 / 模型 / 配置版本的有效历史档位；无有效状态则从官方初始档开始，不从自定义值继续爬升。
 
-See README for exact development test commands, privacy and uninstall restoration. File checksums are supplied in the release's v0.6.4-SHA256.txt.
+## 下载与安装
+
+发布资产：
+
+- `CodexContextMenu-0.6.4-macOS-arm64.dmg`
+- `CodexContextMenu-0.6.4-macOS-arm64.zip`
+- `v0.6.4-SHA256.txt`
+
+校验 SHA-256，解压或挂载后，保持应用与脚本在同一目录，双击 `Install.command`。安装到 `~/Applications`，无需管理员密码。
+
+**整个 Codex 第一次启用本工具接入时，需要完整退出再打开一次；不是每个对话都需要。** 更新运行组件需加载新组件，普通策略切换及升档无需逐次重启。保存后请在下一轮检查实际运行窗口，保存成功不等于已经生效。
+
+### 当前兼容范围
+
+仅支持 **macOS 14+、Apple Silicon、Python 3.11+**，以及已验证的 **官方 0.159.2 CLI / Node 哈希组合**和以下布局：
+
+```text
+/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
+/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node
+```
+
+不同版本、不同 Codex.app 布局、Intel、Windows、Linux 暂不支持；检查失败不会继续安装。
+
+应用为本地临时签名，未获 Apple Developer ID 签名及公证。核对来源及校验值后按系统提示手动批准，不关闭系统安全保护。
+
+## 验证与限制
+
+- 通过 **61 项单元检查**：Swift 22、Node 23、项目配置 11、对话配置 3、安装器 2。
+- 隔离原生生命周期测试检查默认 / 自定义 / 自适应、恢复、重启、分叉、历史前缀及 SQLite 完整性。
+- 本机桌面已验证 485K → 315K → 485K 下一轮切换，不重启官方进程；实际桌面工具、真实剪贴板粘贴及定位已测试。
+- 发布资产已下载回读并核对 SHA-256；ZIP / DMG 包含相同应用和安装程序。
+- **真实超长对话自适应升档尚未完整桌面验收**，不承诺所有插件兼容或长期稳定。合成测试不是压缩质量或速度评测。
+- 重载可能暂时降低缓存复用，不能承诺零缓存成本；实际窗口受官方比例和模型上限约束。
+
+## 隐私与权限
+
+不修改官方应用、聊天历史、SQLite、模型缓存或全局 TOML。对话级写本工具状态；项目级明确写所选项目配置并备份。启动接入保存原环境变量，可恢复。
+
+本地 Token 统计禁止联网；额度查询使用已有认证连接官方 OpenAI 端点，可能进行正常 OAuth 刷新，不读取浏览器 Cookie。发布包不包含私人记录、登录凭据、Python 或官方运行时。
+
+## 后续迭代，不包含在本版
+
+Dock 常驻与完整缩小 / 关闭体验、菜单栏直接修改三种策略、双击菜单栏图标拉起前台。
+
+完整安装、架构、隐私、开发及卸载说明见[中文仓库首页](https://github.com/yimengbenxin/codex-context-menu)。MIT 许可，保留上游 Codex Token Overlay 及 CodexBar、tomlkit 依赖声明。
