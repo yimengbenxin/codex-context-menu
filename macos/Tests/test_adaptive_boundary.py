@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 import tempfile
 import sqlite3
+import sys
 from aiohttp import web, WSMsgType
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
-PYTHON = Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+PYTHON = Path(os.environ.get("CODEX_TEST_PYTHON", sys.executable))
 OUTPUT = Path(os.environ.get("CODEX_CONTEXT_TEST_OUTPUT", str(ROOT / "artifacts/official-adaptive-boundary.json")))
 RESOURCES = Path(os.environ.get("CODEX_CONTEXT_TEST_RESOURCES", str(ROOT / "macos/Resources")))
 MODEL = "gpt-6.1-sol"

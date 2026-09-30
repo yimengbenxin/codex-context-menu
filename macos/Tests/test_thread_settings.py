@@ -2,13 +2,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 import importlib.util
 
 SCRIPT = Path(__file__).resolve().parents[1] / "Resources/context_config.py"
-PYTHON = Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+PYTHON = Path(os.environ.get("CODEX_TEST_PYTHON", sys.executable))
 FIRST = "11111111-1111-4111-8111-111111111111"
 SECOND = "22222222-2222-4222-8222-222222222222"
 SPEC = importlib.util.spec_from_file_location("context_config_thread_test", SCRIPT)
