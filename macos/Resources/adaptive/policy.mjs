@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -32,11 +33,17 @@ export function modelBounds(catalog, model, options = {}) {
   return {model, tiers: [...new Set(tiers)], maximum, percent, thresholds: {lower: lower / 100, upper: upper / 100}};
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--preview') {
-  const input = JSON.parse(fs.readFileSync(0, 'utf8'));
-  const bounds = modelBounds(input.catalog, input.model);
-  const initial = bounds.tiers[0];
-  process.stdout.write(JSON.stringify({...bounds, display_tiers: [initial, Math.floor((initial + bounds.maximum) / 2), bounds.maximum]}));
+export function compactionPolicy(bounds, budget, percent, compact = null, scope = 'total') {
+  const requested = Math.min(budget ?? bounds.tiers[0], bounds.maximum);
+  const maximumPercent = Math.min(99, Math.floor(bounds.maximum * Math.min(90, bounds.percent) / requested));
+  if (percent === null || percent === undefined)
+    return {nativeBudget: budget, compact, scope, expected: Math.floor(requested * bounds.percent / 100), maximum_percent: maximumPercent, budget: requested};
+  if (!Number.isSafeInteger(percent) || percent < 1 || percent > 99) throw new Error('压缩百分比请输入 1–99 的整数；留空跟随官方。');
+  const effective = Math.min(percent, maximumPercent);
+  const expected = Math.floor(requested * effective / 100);
+  return {nativeBudget: Math.ceil(expected * 100 / bounds.percent),
+    compact: Math.floor(bounds.maximum * bounds.percent / 100), scope: 'body_after_prefix', expected,
+    maximum_percent: maximumPercent, budget: requested, effective_percent: effective};
 }
 
 export function feedback(bounds, state, retained, successful, manual) {
@@ -66,7 +73,7 @@ export class BudgetStore {
 
   get(key, revision, bounds) {
     const saved = this.read()[key];
-    if (saved?.revision !== revision || !bounds.tiers.includes(saved.budget))
+    if (!saved || saved.revision !== revision || !bounds.tiers.includes(saved.budget))
       return {budget: bounds.tiers[0], ambiguous: 0, revision};
     return saved;
   }
@@ -111,4 +118,26 @@ export class BudgetStore {
       if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
     }
   }
+}
+
+if (process.argv[1] && fs.existsSync(process.argv[1]) && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)) && process.argv[2] === '--preview') {
+  const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+  const reference = modelBounds(input.catalog, input.model);
+  const settings = input.settings ?? {};
+  const request = input.request;
+  const adaptive = request ? request.mode === 'adaptive' || (settings.scope === 'thread' && request.mode === 'default' && settings.effective_adaptive) : settings.override ? settings.adaptive : settings.effective_adaptive ?? settings.adaptive;
+  const options = request?.options ?? settings.adaptive_options;
+  const bounds = modelBounds(input.catalog, input.model, adaptive ? options : undefined);
+  const revision = settings.override ? settings.budget_revision ?? settings.revision : settings.project_budget_revision ?? settings.budget_revision ?? settings.project_revision ?? settings.revision;
+  const key = `${settings.root}\u0000${input.model}${settings.override ? `\u0000${settings.thread}` : ''}`;
+  const state = new BudgetStore(path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'adaptive-context')).get(key, revision, bounds);
+  const policyOptions = value => JSON.stringify(Object.fromEntries(Object.entries(value ?? {}).filter(([key]) => key !== 'compaction_percent')));
+  const unchanged = !request || (settings.adaptive === adaptive && policyOptions(request.options) === policyOptions(settings.adaptive_options));
+  const inheritedWindow = settings.inherited?.at(-1)?.values?.model_context_window;
+  const budget = adaptive ? unchanged ? state.budget : bounds.tiers[0] : request ? request.window ?? inheritedWindow ?? null : settings.window ?? inheritedWindow ?? null;
+  const selected = request ? request.percent : settings.compaction_percent;
+  const compaction = compactionPolicy(bounds, budget, selected);
+  if (request && selected !== null && selected > compaction.maximum_percent)
+    throw new Error(`当前预算最多允许 ${compaction.maximum_percent}%；压缩线不得超过模型原始上限的 90%。`);
+  process.stdout.write(JSON.stringify({...reference, display_tiers: [reference.tiers[0], Math.floor((reference.tiers[0] + reference.maximum) / 2), reference.maximum], compaction}));
 }

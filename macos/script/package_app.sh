@@ -7,7 +7,7 @@ BUNDLE_ID="local.wen.CodexContextMenu"
 MIN_SYSTEM_VERSION="14.0"
 ARCH="$(uname -m)"
 CONFIGURATION="release"
-VERSION="0.6.6"
+VERSION="0.6.8"
 OUTPUT_DIR=""
 
 usage() {
@@ -65,6 +65,11 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 MACOS_DIR="$ROOT_DIR/macos"
+BUILD_PACKAGE_PATH="${CODEX_CONTEXT_BUILD_PACKAGE_PATH:-$MACOS_DIR}"
+if [[ "$BUILD_PACKAGE_PATH" != "$MACOS_DIR" ]]; then
+  cmp "$BUILD_PACKAGE_PATH/Package.swift" "$MACOS_DIR/Package.swift"
+  diff -qr "$BUILD_PACKAGE_PATH/Sources" "$MACOS_DIR/Sources"
+fi
 ARTIFACTS_ROOT="$ROOT_DIR/artifacts"
 DIST_ROOT="$ROOT_DIR/dist"
 RUNNER_TEMP_VALUE="${RUNNER_TEMP:-}"
@@ -157,13 +162,13 @@ mkdir -p "$OUTPUT_DIR"
 
 swift build \
   -Xswiftc -gnone \
-  --package-path "$MACOS_DIR" \
+  --package-path "$BUILD_PACKAGE_PATH" \
   --configuration "$CONFIGURATION" \
   --arch "$ARCH" \
   --product "$PRODUCT_NAME"
 
 BIN_DIR="$(swift build \
-  --package-path "$MACOS_DIR" \
+  --package-path "$BUILD_PACKAGE_PATH" \
   --configuration "$CONFIGURATION" \
   --arch "$ARCH" \
   --show-bin-path)"

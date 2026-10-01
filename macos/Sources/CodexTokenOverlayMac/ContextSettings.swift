@@ -3,12 +3,54 @@ import Foundation
 import SwiftUI
 import CodexTokenCore
 
+struct CompactionStatistics: Decodable, Sendable {
+    struct Group: Decodable, Sendable {
+        let percent: Int?
+        let scope: String?
+        let samples: Int
+        let automatic: Int
+        let manual: Int
+        let failed: Int
+        let measured: Int
+        let unknown: Int
+        let crossed: Int
+        let observed_rate: Double?
+        let mean_excess: Int64?
+        let p95_excess: Int64?
+        let trigger_crossed: Int?
+        let trigger_measured: Int?
+        let trigger_p95_excess: Int64?
+        let recommended_percent: Int?
+    }
+    struct Sample: Decodable, Sendable {
+        let at: Int64
+        let percent: Int?
+        let before_input: Int64?
+        let before_total: Int64?
+        let after_total: Int64?
+        let duration_ms: Int64
+        let status: String
+        let manual: Bool
+    }
+    let model: String
+    let budget: Int64
+    let groups: [Group]
+    let recent: [Sample]
+    let error: String?
+}
+
 struct ProjectContextStatus: Decodable, Sendable {
     struct Preview: Decodable, Sendable {
+        struct Compaction: Decodable, Sendable {
+            let budget: Int64
+            let maximum_percent: Int
+        }
         let model: String
         let tiers: [Int64]
         let maximum: Int64
         let display_tiers: [Int64]?
+        let percent: Int?
+        let compaction: Compaction?
     }
     struct Inherited: Decodable, Sendable {
         let path: String
@@ -19,6 +61,8 @@ struct ProjectContextStatus: Decodable, Sendable {
     let revision: String
     let window: Int64?
     let compact: Int64?
+    let compaction_percent: Int?
+    let compaction_statistics: CompactionStatistics?
     let adaptive: Bool
     let adaptive_available: Bool
     let adaptive_reason: String?

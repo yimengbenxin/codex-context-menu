@@ -4,7 +4,7 @@ A native macOS companion for choosing a Codex conversation's context budget with
 
 [简体中文](README.md) · [Downloads](https://github.com/yimengbenxin/codex-context-menu/releases) · [Issues](https://github.com/yimengbenxin/codex-context-menu/issues)
 
-**Unofficial community software. Not developed, endorsed or supported by OpenAI.** Version 0.6.6 is an experimental, narrowly compatible release, not a universal Codex patch.
+**Unofficial community software. Not developed, endorsed or supported by OpenAI.** Version 0.6.8 is an experimental, narrowly compatible release, not a universal Codex patch.
 
 ## Why / problems solved
 
@@ -17,6 +17,8 @@ Long tasks need explicit context-budget control without polluting project conver
 - Thread-only overrides, or explicitly selected project-wide settings. Thread overrides do not affect sibling conversations or new forks.
 - Adaptive thresholds (default 35/55 percent) and three ordered tiers are editable. Gray numeric placeholders show defaults; blank fields follow defaults. Previously saved explicit thresholds are preserved until reset. Blank tiers follow official initial, arithmetic midpoint and maximum metadata. Returning from custom mode starts at the initial tier with a new activation revision; remaining in adaptive preserves its tier across restarts. These thresholds control promotion after compaction, not when compaction starts.
 - Default/custom changes load at the next idle turn using the **unmodified signed official CLI**. No compression-model or reasoning-effort optimization is bundled.
+- Custom compaction percentage accepts integers 1–99, warns above 90, and is bounded by 90% of the original model maximum. Blank follows inherited defaults.
+- Local numeric compaction observations distinguish budget crossings from normal trigger-line crossings, unknown/manual/failed samples, and provide a conservative opt-in recommendation after sufficient samples. No text or credentials are stored or uploaded. See [method and limitations](docs/COMPACTION_POLICY.md).
 - Local seven-day Token reporting and manually requested official account quota via pinned CodexBar CLI. Automatic quota refresh is off by default.
 
 ## Installation / requirements
@@ -32,7 +34,7 @@ Discovery supports Codex.app / ChatGPT.app under system or user Applications, wi
 
 Use the existing Codex-managed Python runtime, or Python 3.11+ at `/opt/homebrew/bin/python3` or `/usr/local/bin/python3`. No Python libraries need installing for normal use; the TOML editor is vendored with its license.
 
-1. Download `CodexContextMenu-0.6.6-macOS-arm64.zip` or the equivalent DMG from Releases. Verify against `v0.6.6-SHA256.txt`.
+1. Download `CodexContextMenu-0.6.8-macOS-arm64.zip` or the equivalent DMG from Releases. Verify against `v0.6.8-SHA256.txt`.
 2. Drag the app to Applications and open it. Mounting a DMG is not installation.
 3. Click the in-app component setup/revalidation button. Copying .app alone previously missed runtime integration; restarting cannot install it. Alternatively, keep the supplied files together and double-click Install.command for a backed-up per-user installation. No administrator password is needed.
 4. Fully quit and reopen Codex **once for initial integration**. This is not a per-conversation restart. Installing an updated runtime component also requires loading that new component; ordinary budget changes do not.
@@ -83,6 +85,7 @@ flowchart LR
 - No telemetry, remote control listener, credential sharing or chat upload feature is added by the context controller.
 - Local session logs are read to identify conversations and display usage; chat history, SQLite, official model caches and the official application are not edited.
 - Thread settings live under `$CODEX_HOME/context-menu/threads`. Project-wide settings explicitly update the selected `.codex/config.toml`, with revision checks and backups. Global TOML is not changed.
+- Compaction metadata is stored in the tool's own `context-menu/compaction-observations.sqlite3`, capped at 10,000 entries with 0600 permissions. Project paths are hashed. Reported usage is not an exact server request size or causal probability.
 - A bounded local `runtime-events.jsonl` journal records only whitelisted lifecycle metadata, not messages, tool results or credentials.
 - Startup integration changes four per-user launch environment variables and stores their prior values for restoration. It does not alter the official app bundle.
 - Local cost reporting runs with networking denied. **Quota reads are different:** CodexBar uses existing authentication against official OpenAI endpoints and may perform normal OAuth refresh. There is no browser-cookie fallback. Automatic quota reads default off; turn them off in the Usage tab.
@@ -93,17 +96,20 @@ flowchart LR
 Build requires Xcode command-line tools with Swift 5.10+; development tests also use Node and Python 3.11+.
 
 ```sh
-swift test --package-path macos
+bash scripts/test_swift.sh
 node --test macos/Tests/adaptive.test.mjs macos/Tests/privacy-boundary.test.mjs
 python3 -B -m unittest discover -s macos/Tests -p test_context_config.py
 python3 -B -m unittest discover -s macos/Tests -p test_thread_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_installer.py
 python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
-bash scripts/build_release.sh 0.6.6
+node --test macos/Tests/compaction-observer.test.mjs
+python3 -B -m unittest discover -s macos/Tests -p 'test_compaction*.py'
+bash scripts/build_release.sh 0.6.8
+python3 -B scripts/verify_package.py 0.6.8
 ```
 
-The 0.6.6 suite includes 88 unit checks: 36 Swift, 25 Node, 11 project, 3 thread, 3 installer, 4 adaptive-setting, 3 protocol and 3 preview checks. Focus tests cover exact/duplicate/renamed/archived titles, bound SQL characters, read-only lookup, changed focus fingerprints and multiple subscriptions. Native synthetic-response tests cover default/custom/adaptive, recovery, restart/fork, preserved history prefixes and SQLite integrity. Earlier live desktop checks verified 485K → 315K → 485K effective windows without restarting the official processes, plus a genuine desktop tool call. Native clipboard paste and link resolution were exercised, not replaced by direct field assignment.
+The 0.6.8 suite includes 112 unit checks: 40 Swift, 32 Node and 40 Python, without skips. Native 0.159.2 canaries exercise two sets of 11 automatic compactions at a 272K budget and 95% target: 270.005K observations preserve 95%, while 280.005K observations recommend 92%. Packaged resources repeat this chain after extraction. Cold restart, history prefixes, database integrity and protected primary configuration/binary hashes are checked. Prior 0.159.0 lifecycle acceptance is retained, not claimed as a new observation-feature test on that version. Live companion read/refresh and draft preservation passed; the primary process is not automatically restarted or claimed to have loaded the new observer. Synthetic tests are not real-model speed, quality or long-term stability evidence.
 
 To run the optional native fixture, install `requirements-test.txt` into an isolated environment and run `python3 -B macos/Tests/test_adaptive_boundary.py` with the supported official app and model metadata available. It uses synthetic responses on loopback; it is not a real-model speed or quality test.
 

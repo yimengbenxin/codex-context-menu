@@ -10,6 +10,8 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
+
 HOME = Path.home()
 SUPPORT = HOME / "Library/Application Support/CodexContextTool"
 APPLICATION = HOME / "Applications/CodexContextMenu.app"
@@ -103,8 +105,13 @@ if not integrate_only:
     APPLICATION.parent.mkdir(parents=True, exist_ok=True)
     if staged.exists():
         raise RuntimeError("Unfinished installation staging directory exists")
-    copy_bundle(candidate, staged)
-    command("/usr/bin/codesign", "--verify", "--deep", "--strict", str(staged))
+    try:
+        copy_bundle(candidate, staged)
+        command("/usr/bin/codesign", "--verify", "--deep", "--strict", str(staged))
+    except Exception:
+        if staged.exists():
+            shutil.rmtree(staged)
+        raise
     if not preserve_window:
         menu_stop()
 try:
@@ -120,7 +127,7 @@ try:
         (adaptive / "backend").chmod(0o755)
     all_files = {}
     for file in (APPLICATION / "Contents/Resources").rglob("*"):
-        if file.is_file() and ("adaptive" in file.parts or "vendor" in file.parts or "usage" in file.parts or file.name in ("context_config.py", "thread_settings.py", "runtime_probe.py", "adaptive_settings.py")):
+        if file.is_file() and ("adaptive" in file.parts or "vendor" in file.parts or "usage" in file.parts or file.name in ("context_config.py", "thread_settings.py", "runtime_probe.py", "adaptive_settings.py", "adaptive_preview.py", "compaction_observations.py")):
             all_files[os.path.relpath(file, adaptive)] = digest(file)
     manifest = {"accepted": True, "scope": "synthetic-runtime-lifecycle-and-genuine-desktop-tools",
         "real_long_history_accepted": False, **runtime, "python": sys.executable,

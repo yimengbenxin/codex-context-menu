@@ -19,6 +19,26 @@ THREAD = "11111111-1111-4111-8111-111111111111"
 
 
 class AdaptivePreviewTests(unittest.TestCase):
+    def test_preview_entrypoint_resolves_package_path_alias(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            alias = Path(temporary) / "resources-alias"
+            alias.symlink_to(RESOURCES, target_is_directory=True)
+            catalog = {"models": [{"slug": "alias-fixture", "context_window": 272000,
+                "max_context_window": 872000, "effective_context_window_percent": 95}]}
+            result = subprocess.run([shutil.which("node"), str(alias / "adaptive/policy.mjs"), "--preview"],
+                input=json.dumps({"catalog": catalog, "model": "alias-fixture"}),
+                capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout)["compaction"]["budget"], 272000)
+
+    def test_preview_without_shell_home_uses_system_home(self):
+        environment = {key: value for key, value in os.environ.items() if key not in ("HOME", "CODEX_HOME")}
+        catalog = {"models": [{"slug": "preview-no-home-fixture", "context_window": 272000,
+            "max_context_window": 872000, "effective_context_window_percent": 95}]}
+        result = subprocess.run([shutil.which("node"), str(RESOURCES / "adaptive/policy.mjs"), "--preview"],
+            input=json.dumps({"catalog": catalog, "model": "preview-no-home-fixture", "settings": {"root": "/preview-fixture"}}),
+            capture_output=True, text=True, env=environment, check=True)
+        self.assertEqual(json.loads(result.stdout)["compaction"]["maximum_percent"], 99)
+
     def test_exact_thread_model_takes_precedence_and_index_remains_read_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)

@@ -39,8 +39,12 @@ final class ContextSettingsModel: ObservableObject {
     @Published var page: CompanionPage = .context
     @Published var project: String?
     @Published var status: ProjectContextStatus?
+    @Published var compactionStatistics: CompactionStatistics?
+    @Published var statisticsError: String?
+    @Published var statisticsBusy = false
     @Published var mode: ContextMode = .default
     @Published var input = ""
+    @Published var compactionInput = ""
     @Published var lowerThreshold = ""
     @Published var upperThreshold = ""
     @Published var tierInputs = ["", "", ""]
@@ -64,6 +68,7 @@ final class ContextSettingsModel: ObservableObject {
     private var generation = UUID()
     private var savedMode: ContextMode = .default
     private var savedInput = ""
+    private var savedCompaction = ""
     private var savedAdaptive: AdaptiveOptions?
 
     func adaptiveOptions() throws -> AdaptiveOptions {
@@ -97,11 +102,24 @@ final class ContextSettingsModel: ObservableObject {
         }
         return nil
     }
-    var dirty: Bool { mode != savedMode || (mode == .custom && input != savedInput) || (mode == .adaptive && (try? adaptiveOptions()) != savedAdaptive) }
+    var compactionWarning: Bool { (Int(compactionInput.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 90 }
+    var compactionValidation: String? {
+        let value = compactionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return nil }
+        guard let percent = Int(value), (1...99).contains(percent) else { return "压缩百分比请输入 1–99 的整数；留空跟随官方。" }
+        guard let preview = status?.adaptive_preview else { return "尚未读取官方模型上限，请重新读取后设置压缩百分比。" }
+        let unchanged = mode == savedMode && (mode != .custom || input == savedInput) && (mode != .adaptive || (try? adaptiveOptions()) == savedAdaptive)
+        if unchanged, let maximum = preview.compaction?.maximum_percent, percent > maximum {
+            return "当前预算最多允许 \(maximum)%；压缩线不得超过模型原始上限的90%。"
+        }
+        return nil
+    }
+    var dirty: Bool { mode != savedMode || compactionInput != savedCompaction || (mode == .custom && input != savedInput) || (mode == .adaptive && (try? adaptiveOptions()) != savedAdaptive) }
     var canSave: Bool {
-        status?.trusted == true && !loading && !saving && !identifying && !repairingRuntime && !targetVerificationFailed && validation == nil && (dirty || integrationPending)
+        status?.trusted == true && !loading && !saving && !identifying && !repairingRuntime && !targetVerificationFailed && validation == nil && compactionValidation == nil && (dirty || integrationPending)
             && (mode != .adaptive || status?.adaptive_available == true)
             && (scope != .thread || (threadID != nil && status?.adaptive_available == true))
+            && (compactionInput.isEmpty || status?.adaptive_available == true)
     }
 
     func load(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64?, scope: ContextScope? = nil, origin: ContextTargetOrigin? = nil, title: String? = nil, selectedMode: ContextMode? = nil) {
@@ -119,6 +137,8 @@ final class ContextSettingsModel: ObservableObject {
         self.observedWindow = observedWindow
         self.observedTarget = observedTarget
         status = nil
+        compactionStatistics = nil
+        statisticsError = nil
         error = nil
         feedback = nil
         loading = true
@@ -154,11 +174,35 @@ final class ContextSettingsModel: ObservableObject {
         load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, scope: scope, title: threadTitle)
     }
 
+    @discardableResult
+    func refreshStatistics(reader: @escaping @Sendable ([String]) throws -> ProjectContextStatus = { try ContextBackend.run($0) }) -> Task<Void, Never>? {
+        guard let project, !statisticsBusy, !loading, !saving else { return nil }
+        let request = generation
+        let revision = status?.revision
+        let arguments = scope == .thread ? ["thread-status", project, threadID!] : ["status", project]
+        statisticsBusy = true
+        statisticsError = nil
+        return Task {
+            defer { statisticsBusy = false }
+            do {
+                let result = try await Task.detached(priority: .utility) { try reader(arguments) }.value
+                guard generation == request, status?.revision == revision else { return }
+                compactionStatistics = result.compaction_statistics
+            } catch {
+                guard generation == request, status?.revision == revision else { return }
+                statisticsError = "刷新失败，保留上次统计：" + error.localizedDescription
+            }
+        }
+    }
+
     private func adopt(_ result: ProjectContextStatus) {
         status = result
+        compactionStatistics = result.compaction_statistics
         project = result.root
         mode = result.adaptive ? .adaptive : (result.window == nil ? .default : .custom)
         input = result.window.map { String($0 / 1000) } ?? ""
+        compactionInput = result.compaction_percent.map(String.init) ?? ""
+        savedCompaction = compactionInput
         savedMode = mode
         savedInput = input
         savedAdaptive = result.adaptive_options ?? result.adaptive_defaults
@@ -212,7 +256,9 @@ final class ContextSettingsModel: ObservableObject {
         let selectedMode = mode.rawValue
         let value = mode == .custom ? input : ""
         let options = (try? adaptiveOptions()) ?? savedAdaptive
-        guard let encoded = try? JSONEncoder().encode(options), let adaptiveJSON = String(data: encoded, encoding: .utf8) else { return }
+        guard let encoded = try? JSONEncoder().encode(options), var object = (try? JSONSerialization.jsonObject(with: encoded)) as? [String: Any] else { return }
+        object["compaction_percent"] = Int(compactionInput.trimmingCharacters(in: .whitespacesAndNewlines)).map { $0 as Any } ?? NSNull()
+        guard let serialized = try? JSONSerialization.data(withJSONObject: object), let adaptiveJSON = String(data: serialized, encoding: .utf8) else { return }
         let arguments = scope == .thread && threadID != nil
             ? ["thread-save", root, threadID!, value, revision, selectedMode, adaptiveJSON]
             : ["save", root, value, revision, selectedMode, adaptiveJSON]

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {AdaptiveController} from './controller.mjs';
+import {CompactionObserver} from './compaction-observer.mjs';
 
 const binary = process.env.CODEX_CONTEXT_OFFICIAL_BINARY ?? JSON.parse(fs.readFileSync(
   path.join(os.homedir(), 'Library/Application Support/CodexContextTool/official-adaptive-runtime.json'), 'utf8')).binary;
@@ -13,6 +14,7 @@ const appServer = argumentsList.includes('app-server') && !argumentsList.some(ar
 const child = spawn(binary, argumentsList,
   {stdio: appServer ? ['pipe', 'pipe', 'inherit'] : 'inherit'});
 let controller;
+let observations;
 
 if (appServer) {
   const pending = new Map();
@@ -24,6 +26,7 @@ if (appServer) {
     child.stdin.write(JSON.stringify({id, method, params}) + '\n');
   });
   controller = new AdaptiveController(request);
+  observations = new CompactionObserver(controller);
   readline.createInterface({input: child.stdout}).on('line', line => {
     let message;
     try { message = JSON.parse(line); }
@@ -40,7 +43,7 @@ if (appServer) {
       const original = forwarded.get(message.id);
       controller.reply(original, message);
       forwarded.delete(message.id);
-    } else controller.observe(message);
+    } else { observations.observe(message); controller.observe(message); }
     process.stdout.write(line + '\n');
   });
   let sequence = Promise.resolve();
@@ -68,5 +71,6 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(
 child.on('error', error => { process.stderr.write(error.message + '\n'); process.exit(1); });
 child.on('exit', async code => {
   await controller?.writes;
+  await observations?.close();
   process.exit(code ?? 1);
 });

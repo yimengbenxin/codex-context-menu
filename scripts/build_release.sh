@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-version="${1:-0.6.6}"
-[[ "$version" == 0.6.6 ]] || { echo 'Use a reviewed compatibility manifest before releasing another version' >&2; exit 1; }
+version="${1:-0.6.8}"
+[[ "$version" == 0.6.8 ]] || { echo 'Use a reviewed compatibility manifest before releasing another version' >&2; exit 1; }
 cd "$root"
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/codex-context-release.XXXXXX")"
 trap 'rm -rf "$temporary"' EXIT

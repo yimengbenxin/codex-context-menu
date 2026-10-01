@@ -1,5 +1,5 @@
 {
-  "release": "0.6.6",
+  "release": "0.6.8",
   "compatibilityMode": "signed-protocol-capability",
   "verifiedVersions": ["0.159.0", "0.159.2"],
   "referenceRuntime": {

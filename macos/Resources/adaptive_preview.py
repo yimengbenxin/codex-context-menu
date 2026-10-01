@@ -30,15 +30,22 @@ def selected_model(home, root, thread_id):
     return model
 
 
-def preview_status(status, thread_id=None):
+def preview_status(status, thread_id=None, request=None):
     try:
         home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
         model = selected_model(home, Path(status["root"]), thread_id)
         catalog = json.loads((home / "models_cache.json").read_text())
         _, node = runtime_probe.verify_identity(*runtime_probe.discover())
         policy = Path(__file__).parent / "adaptive/policy.mjs"
-        result = subprocess.run([str(node), str(policy), "--preview"], input=json.dumps({"catalog": catalog, "model": model}),
+        result = subprocess.run([str(node), str(policy), "--preview"], input=json.dumps({"catalog": catalog, "model": model, "settings": status, "request": request}),
             capture_output=True, text=True, check=True, timeout=10)
-        return {"adaptive_preview": json.loads(result.stdout)}
+        preview = json.loads(result.stdout)
+        from compaction_observations import report
+        statistics = report(home, status["root"], thread_id, model, preview["compaction"]["budget"], preview["compaction"]["maximum_percent"])
+        return {"adaptive_preview": preview, "compaction_statistics": statistics}
+    except subprocess.CalledProcessError as error:
+        lines = [line.strip() for line in error.stderr.splitlines() if line.strip()]
+        reason = next((line.removeprefix("Error: ") for line in lines if "Error:" in line or "Error [" in line), lines[0] if lines else "参数校验失败。")
+        return {"adaptive_preview_reason": f"压缩设置未通过：{reason}"}
     except (OSError, ValueError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as error:
         return {"adaptive_preview_reason": f"官方档位暂未读取：{error}"}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {BudgetStore, feedback, modelBounds} from '../Resources/adaptive/policy.mjs';
+import {BudgetStore, feedback, modelBounds, compactionPolicy} from '../Resources/adaptive/policy.mjs';
 import {AdaptiveController} from '../Resources/adaptive/controller.mjs';
 import {resumeSettings} from '../Resources/adaptive/resume-settings.mjs';
 
@@ -345,5 +345,40 @@ test('failed switch to default restores the old running window and retries next 
   assert.equal(calls.filter(call => call.method === 'thread/resume').at(-1).params.config.model_context_window, 210000);
   rejectDefault = false;
   await controller.before(turn);
-  assert.equal(controller.sessions.get('first').applied, JSON.stringify([null, null]));
+  assert.equal(controller.sessions.get('first').applied, JSON.stringify([null, null, 'total']));
+});
+
+test('compaction percent is bounded by 99 and the original model safety ceiling', () => {
+  const official = modelBounds({models: [{slug: 'large', context_window: 272000, max_context_window: 872000, effective_context_window_percent: 95}]}, 'large');
+  const small = compactionPolicy(official, 272000, 99);
+  assert.equal(small.expected, 269280);
+  assert.equal(small.nativeBudget, 283453);
+  assert.equal(small.maximum_percent, 99);
+  const large = compactionPolicy(official, 870000, 95);
+  assert.equal(large.maximum_percent, 90);
+  assert.equal(large.effective_percent, 90);
+  assert.equal(large.expected, 783000);
+  assert.ok(large.expected <= 872000 * 0.9);
+  const limited = {...official, maximum: 272000};
+  assert.equal(compactionPolicy(limited, 272000, 99).effective_percent, 90);
+  for (const value of [0, 100, 95.5, NaN, '95']) assert.throws(() => compactionPolicy(official, 272000, value));
+  assert.equal(compactionPolicy(official, null, null).nativeBudget, null);
+});
+
+test('percentage reloads next turn, preserves the requested budget, and restores official defaults', async context => {
+  let percent = 99;
+  const {controller, calls} = fixture(context, {settings: async cwd => ({root: cwd, trusted: true, adaptive: false, compaction_percent: percent}),
+    request: async method => method === 'config/read' ? {config: {model_context_window: 160000}} : undefined});
+  await controller.before(turn);
+  const changed = calls.filter(call => call.method === 'thread/resume').at(-1).params.config;
+  assert.equal(changed.model_context_window, 166737);
+  assert.equal(changed.model_auto_compact_token_limit_scope, 'body_after_prefix');
+  assert.equal((await controller.context('/project', 'fixture', 'first')).budget, 160000);
+  assert.equal(changed.model_reasoning_effort, 'high');
+  percent = null;
+  await controller.before(turn);
+  const restored = calls.filter(call => call.method === 'thread/resume').at(-1).params.config;
+  assert.equal(restored.model_context_window, 160000);
+  assert.equal(restored.model_auto_compact_token_limit_scope, 'total');
+  assert.ok(!('model_auto_compact_token_limit' in restored));
 });

@@ -2,9 +2,9 @@
 
 一个原生 macOS 伴随工具：不用在聊天里发送配置指令，即可为 Codex 对话或项目选择上下文策略，并查看 Token 用量与账户额度。
 
-[下载试用版](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.6) · [反馈问题](https://github.com/yimengbenxin/codex-context-menu/issues) · [English](README.en.md)
+[下载试用版](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.8) · [反馈问题](https://github.com/yimengbenxin/codex-context-menu/issues) · [English](README.en.md)
 
-**非 OpenAI 官方产品，未获 OpenAI 背书。0.6.6 是兼容范围有限的实验性试用版，不是适用于所有 Codex 安装的通用补丁。**
+**非 OpenAI 官方产品，未获 OpenAI 背书。0.6.8 是兼容范围有限的实验性试用版，不是适用于所有 Codex 安装的通用补丁。**
 
 ## 为什么做这个工具
 
@@ -23,6 +23,8 @@
 | 识别当前对话 | 优先读取 Codex 焦点窗口的对话标题，精确匹配唯一 ID；不按后台输出或最近订阅猜测 |
 | 深度链接 | 支持粘贴 `codex://threads/<UUID>` 并定位；提供原生 ⌘V、⌘A 等编辑操作 |
 | 下一轮加载 | 接入后，默认、自定义切换及自适应升档无需逐次重启 Codex |
+| 自动压缩线 | 支持1–99%的整数；超过90%显示红字，压缩目标不超过模型原始最大窗口的90% |
+| 本地压缩观测 | 记录数字用量、耗时与结果，区分预算越线、正常触发、未知及手动样本；达到样本要求后给保守建议，不自动应用 |
 | 用量概览 | 查看本地近七天 Token 统计，手动读取官方账户额度；自动额度刷新默认关闭 |
 | 安装与恢复 | 支持拖入应用后在窗口内完成接入；协议检查、旧安装备份、失败回滚及启动环境恢复 |
 
@@ -46,11 +48,11 @@
 
 ### 下载与安装
 
-到 [0.6.6 发布页](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.6) 下载：
+到 [0.6.8 发布页](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.8) 下载：
 
-- `CodexContextMenu-0.6.6-macOS-arm64.dmg`：磁盘映像。
-- `CodexContextMenu-0.6.6-macOS-arm64.zip`：压缩包，与 DMG 包含相同应用和安装程序。
-- `v0.6.6-SHA256.txt`：文件校验值。
+- `CodexContextMenu-0.6.8-macOS-arm64.dmg`：磁盘映像。
+- `CodexContextMenu-0.6.8-macOS-arm64.zip`：压缩包，与 DMG 包含相同应用和安装程序。
+- `v0.6.8-SHA256.txt`：文件校验值。
 
 1. 校验下载文件，解压 ZIP 或挂载 DMG。
 2. 将 `CodexContextMenu.app` 拖入 DMG 中的 Applications 入口，再从应用目录打开。挂载 DMG 本身并不等于安装。
@@ -106,6 +108,12 @@ python3 install_local.py ./CodexContextMenu.app --check
 
 会话重载可能暂时降低缓存命中率，**不能承诺零缓存成本**。已观察到切换后命中率短暂下降、后续请求恢复较高复用，但这不是严格控制变量的因果测试。
 
+### 自动压缩线与本地推荐
+
+压缩百分比留空继承默认；自定义上限99%，超过90%仅显示越线红字提示。压缩线同时受模型原始最大窗口90%的工具安全余量约束。修改仍在下一轮生效，不更换压缩模型或推理强度。
+
+展开“本地压缩观测与推荐”，查看当前模型和已保存预算下的压缩前后用量、耗时、观测预算越线率与建议。未知样本不算成未越线；超过触发线本身是正常触发，不等于超过预算。至少10条可比成功自动样本、覆盖率80%后才给建议，不自动修改设置。这是最近报告用量的统计，不是服务端精确请求大小或因果概率。详见[计算方法与限制](docs/COMPACTION_POLICY.md)。
+
 ## 架构与工作流程
 
 ```mermaid
@@ -134,6 +142,7 @@ flowchart LR
 - 为识别对话和显示用量，需要读取本地会话元数据与日志；焦点识别只读窗口标题及 SQLite 中的 ID / 名称，不遍历聊天正文。**不编辑聊天历史、SQLite、官方模型缓存或官方应用文件**。
 - 对话设置写入 `$CODEX_HOME/context-menu/threads`；项目级明确写入所选 `.codex/config.toml`，带版本检查和备份；不修改全局 TOML。
 - 有界的 `runtime-events.jsonl` 只记录白名单生命周期元数据，不记录消息内容、工具结果或凭据。
+- 压缩数字观测写入本工具的 `context-menu/compaction-observations.sqlite3`，最多10000条、权限0600；项目路径只存哈希，不保存正文、代码或凭据，不上传。它不修改官方聊天数据库。
 - 启动接入修改四个用户级启动环境变量，并保存原值以便恢复；不修改官方应用包。
 - **本地 Token 统计禁止联网。账户额度查询不是离线操作**：固定版本 CodexBar 使用已有认证访问官方 OpenAI 端点，可能进行正常 OAuth 刷新；没有浏览器 Cookie 回退，自动额度刷新默认关闭。
 - 正常 Codex 请求保留官方自身的网络行为。本工具不是离线 Codex，也不能提供“整个系统绝无风险”的保证。
@@ -141,7 +150,7 @@ flowchart LR
 
 ## 验证结果与已知限制
 
-0.6.6 的单元检查包含 **88 项**：36 项 Swift、25 项 Node、11 项项目配置、3 项对话配置、3 项安装器、4 项自适应参数、3 项协议检查及 3 项档位预览。另有 0.159.0 / 0.159.2 隔离原生生命周期、签名与安装前检查及发布资产校验。
+0.6.8 的单元检查包含 **112 项**：40项Swift、32项Node、40项Python，无跳过。另有官方签名0.159.2隔离原生金丝雀、发布包解包资源复测与安装前检查。0.159.0的生命周期兼容性沿用此前验收，本次新增观测链路在0.159.2验证，不宣称所有版本均已复测。
 
 已验证：
 
@@ -151,6 +160,8 @@ flowchart LR
 - 焦点标题唯一匹配、重名拒绝、改名、归档、SQL 字符、数据库只读、窗口 / 进程 / 标题变化；本机诊断确认焦点对话可以不同于后台订阅。实际伴随应用的焦点权限需用户授权，未授权时明确阻止自动识别。
 - 两个官方 CLI 版本的隔离测试验证 30 / 50 阈值、320K / 550K / 800K 档位、下一轮升档、自定义切回初始档、重启保持新代次及数据库完整性。
 - 全新用户目录与只复制应用后的组件接入、失败回滚已通过文件系统夹具；这不等同于一台真实全新 Mac 的完整验收。
+- 0.6.8原生金丝雀：272K/95%两组各11次压缩，270.005K不越预算、280.005K越预算8.005K，建议分别为95%和92%；冷重启、对话隔离、历史前缀、数据库完整性、数字白名单和主配置/官方程序摘要均通过。
+- 本机伴随窗口重新读取及统计刷新成功；跨项目切换和刷新不覆盖未保存草稿。主Codex不会被验收自动重启，新增采集组件需用户更新接入后完整重启一次加载。
 
 **尚未证明**：真实超长对话自适应升档的完整桌面验收、所有插件兼容性及长期稳定性。合成生命周期测试不是模型压缩速度或质量评测。
 
@@ -165,14 +176,17 @@ flowchart LR
 需要 Xcode 命令行工具和 Swift 5.10+；测试还需要 Node 与 Python 3.11+。
 
 ```sh
-swift test --package-path macos
+bash scripts/test_swift.sh
 node --test macos/Tests/adaptive.test.mjs macos/Tests/privacy-boundary.test.mjs
 python3 -B -m unittest discover -s macos/Tests -p test_context_config.py
 python3 -B -m unittest discover -s macos/Tests -p test_thread_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_installer.py
 python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
-bash scripts/build_release.sh 0.6.6
+node --test macos/Tests/compaction-observer.test.mjs
+python3 -B -m unittest discover -s macos/Tests -p 'test_compaction*.py'
+bash scripts/build_release.sh 0.6.8
+python3 -B scripts/verify_package.py 0.6.8
 ```
 
 可选原生夹具：在隔离环境安装 `requirements-test.txt`，具备受支持的官方程序和模型元数据后，运行 `python3 -B macos/Tests/test_adaptive_boundary.py`。它使用本地回环上的合成响应，不代表真实模型的质量和速度。

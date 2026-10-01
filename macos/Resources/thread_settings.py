@@ -26,7 +26,7 @@ def thread_status(project, thread_id, read_config, revision):
     if entry is not None:
         if entry.get("root") != project["root"] or entry.get("thread") != thread_id.lower():
             raise ValueError("对话设置与项目不一致，未加载。")
-        if entry.get("mode") not in ("custom", "adaptive"):
+        if entry.get("mode") not in ("default", "custom", "adaptive"):
             raise ValueError("对话设置格式无效。")
         window = entry.get("window")
         if entry["mode"] == "custom" and (type(window) is not int or not 0 < window <= 2**63 - 1):
@@ -39,7 +39,9 @@ def thread_status(project, thread_id, read_config, revision):
     if values:
         inherited.append({"path": project["path"], "values": values})
     return {**project, "path": str(path), "revision": revision(raw), "scope": "thread",
-            "thread": thread_id.lower(), "override": entry is not None,
+            "thread": thread_id.lower(), "override": entry is not None and entry["mode"] != "default",
+            "budget_revision": adaptive_settings.budget_revision(raw, thread=True), "project_budget_revision": project["budget_revision"],
+            "compaction_percent": entry.get("adaptive_options", {}).get("compaction_percent", project.get("compaction_percent")) if entry else project.get("compaction_percent"),
             "effective_adaptive": project["adaptive"], "project_revision": project["revision"],
             "window": entry.get("window") if entry else None,
             "adaptive_options": adaptive_settings.options(entry.get("adaptive_options", project.get("adaptive_options"))) if entry else project.get("adaptive_options", adaptive_settings.options()),
@@ -57,6 +59,8 @@ def save_thread(project, thread_id, value, expected, mode, read_config, revision
         raise ValueError("自适应运行时不可用，未保存。")
     tokens = parse_k(value) if mode == "custom" else None
     current = thread_status(project, thread_id, read_config, revision)
+    adaptive_settings.validate_compaction(current, mode, tokens, adaptive_raw, thread_id)
+    selected = adaptive_settings.overrides(adaptive_raw if adaptive_raw is not None else current["adaptive_options"])
     path = Path(current["path"])
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -64,12 +68,12 @@ def save_thread(project, thread_id, value, expected, mode, read_config, revision
         fcntl.flock(lock, fcntl.LOCK_EX)
         if revision(read_config(path)) != expected:
             raise ValueError("设置已被其他程序修改，请点击重新读取。")
-        if mode == "default" or (mode == "custom" and tokens is None):
+        if (mode == "default" or (mode == "custom" and tokens is None)) and selected.get("compaction_percent") is None:
             if path.exists():
                 path.unlink()
         else:
-            entry = {"root": project["root"], "thread": thread_id.lower(), "mode": mode, "window": tokens,
-                "adaptive_options": adaptive_settings.overrides(adaptive_raw if adaptive_raw is not None else current["adaptive_options"]),
+            entry = {"root": project["root"], "thread": thread_id.lower(), "mode": "default" if mode == "custom" and tokens is None else mode, "window": tokens,
+                "adaptive_options": selected,
                 "adaptive_activation": current["adaptive_activation"] if mode != "adaptive" or current["adaptive"] else str(uuid.uuid4())}
             temporary_descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".settings-")
             try:

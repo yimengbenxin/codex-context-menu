@@ -100,7 +100,8 @@ def status(root):
             "adaptive": adaptive_enabled(document),
             "adaptive_available": capability.get("adaptive", False),
             "adaptive_reason": capability.get("reason"), "adaptive_options": adaptive_settings.from_project(document),
-            "adaptive_defaults": adaptive_settings.options(),
+            "adaptive_defaults": adaptive_settings.options(), "budget_revision": adaptive_settings.budget_revision(raw),
+            "compaction_percent": adaptive_settings.from_project(document).get("compaction_percent"),
             "trusted": trusted, "inherited": inherited}
 
 
@@ -109,6 +110,7 @@ def save(root, value, expected_revision, mode="custom", adaptive_raw=None):
         raise ValueError("不支持的上下文模式。")
     tokens = parse_k(value) if mode == "custom" else None
     initial = status(root)
+    adaptive_settings.validate_compaction(initial, mode, tokens, adaptive_raw)
     if mode == "adaptive" and not initial["adaptive_available"]:
         raise ValueError("自适应运行时尚未验证，或官方软件已更新；未修改项目。")
     if not initial["trusted"]:
@@ -116,7 +118,7 @@ def save(root, value, expected_revision, mode="custom", adaptive_raw=None):
     path = Path(initial["path"])
     if initial["revision"] != expected_revision:
         raise ValueError("配置已被其他程序修改，请点击重新读取。")
-    if tokens is None and mode != "adaptive" and not path.exists():
+    if tokens is None and mode != "adaptive" and not path.exists() and not (adaptive_raw and adaptive_settings.options(adaptive_raw).get("compaction_percent")):
         return initial
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.parent / "context-menu.lock"
@@ -127,6 +129,7 @@ def save(root, value, expected_revision, mode="custom", adaptive_raw=None):
         if revision(raw) != expected_revision:
             raise ValueError("配置已被其他程序修改，请点击重新读取。")
         document = tomlkit.parse(raw.decode("utf-8"))
+        adaptive_settings.write_compaction(document, adaptive_raw)
         for key in KEYS:
             document.pop(key, None)
         features = document.get("features")

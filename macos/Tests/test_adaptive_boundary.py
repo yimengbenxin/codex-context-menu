@@ -104,7 +104,11 @@ class Rpc:
 
 async def run():
     global force_large_turns, force_large_tokens
-    result = {"passed": False, "scope": "signed official runtime with local synthetic responses",
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    protected = [Path.home() / ".codex/config.toml", Path(os.environ.get("CODEX_CONTEXT_TEST_BINARY", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"))]
+    before = {str(file): hashlib.sha256(file.read_bytes()).hexdigest() for file in protected}
+    result = {"passed": False, "scope": "selected native runtime with local synthetic responses",
+              "runtime_binary": os.environ.get("CODEX_CONTEXT_TEST_BINARY", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
               "main_modified": False, "desktop_tools_tested": False, "real_quality_tested": False}
     application = web.Application()
     application.router.add_route("*", "/{tail:.*}", mock)
@@ -147,7 +151,7 @@ trust_level = "trusted"
         support.mkdir(parents=True)
         adaptive = RESOURCES / "adaptive"
         files = {os.path.relpath(file, adaptive): hashlib.sha256(file.read_bytes()).hexdigest()
-            for file in [*adaptive.glob("*"), RESOURCES / "context_config.py", RESOURCES / "thread_settings.py", RESOURCES / "adaptive_settings.py"] if file.is_file()}
+            for file in [*adaptive.glob("*"), *[RESOURCES / name for name in ("context_config.py", "thread_settings.py", "adaptive_settings.py", "adaptive_preview.py", "compaction_observations.py")]] if file.is_file()}
         manifest = {"accepted": True, "contract": "round-boundary-v1", "files": files, "python": str(PYTHON),
             "binary": environment["CODEX_CONTEXT_OFFICIAL_BINARY"], "node": NODE,
             "officialSha256": hashlib.sha256(Path(environment["CODEX_CONTEXT_OFFICIAL_BINARY"]).read_bytes()).hexdigest(),
@@ -295,7 +299,7 @@ trust_level = "trusted"
                 configured = await rpc.request("thread/start", {"model": MODEL, "cwd": str(configured_project),
                     "approvalPolicy": "never", "sandbox": "read-only"})
                 configured_id = configured["thread"]["id"]
-                force_large_tokens = 300000
+                force_large_tokens = 320000 * percent // 100 + 1000
                 force_large_turns = 1
                 configured_windows = [await rpc.turn(configured_id) for _ in range(3)]
                 assert configured_windows == [320000 * percent // 100, 320000 * percent // 100, 550000 * percent // 100], configured_windows
@@ -315,6 +319,53 @@ trust_level = "trusted"
                 result["configurable_policy"] = {"thresholds": [30, 50], "tiers": [320000, 550000, 800000],
                     "observed_windows": configured_windows, "custom_return_initial": reset_window, "reset_survives_restart": True,
                     "database_integrity": True}
+                observation_cases = []
+                for input_tokens, expected_crossed, recommended in [(270000, 0, 95), (280000, 11, 92)]:
+                    observed_project = directory / f"observation-{input_tokens}"
+                    (observed_project / ".codex").mkdir(parents=True)
+                    (observed_project / ".codex/config.toml").write_text("model_context_window = 272000\n[codex_context_tool]\ncompaction_percent = 95\n")
+                    global_config.write_text(global_config.read_text() + f'\n[projects.{json.dumps(str(observed_project))}]\ntrust_level = "trusted"\n')
+                    created = await rpc.request("thread/start", {"model": MODEL, "cwd": str(observed_project),
+                        "approvalPolicy": "never", "sandbox": "read-only"})
+                    observed_id = created["thread"]["id"]
+                    observed_history = Path(created["thread"]["path"])
+                    force_large_tokens = input_tokens
+                    force_large_turns = 12
+                    assert all(window == 258400 for window in [await rpc.turn(observed_id) for _ in range(11)])
+                    prefix = observed_history.read_bytes()
+                    await stop()
+                    rpc = await start()
+                    await rpc.request("thread/resume", {"threadId": observed_id})
+                    assert await rpc.turn(observed_id) == 258400
+                    await stop()
+                    assert observed_history.read_bytes().startswith(prefix)
+                    command = await asyncio.create_subprocess_exec(str(PYTHON), "-B", str(RESOURCES / "context_config.py"),
+                        "thread-status", str(observed_project), observed_id, "--preview", env=environment,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    output, errors = await command.communicate()
+                    assert command.returncode == 0, errors.decode()
+                    status = json.loads(output)
+                    assert "compaction_statistics" in status, status
+                    statistics = status["compaction_statistics"]
+                    group = statistics["groups"][0]
+                    assert (group["samples"], group["automatic"], group["measured"], group["unknown"], group["crossed"]) == (11, 11, 11, 0, expected_crossed), group
+                    assert group["recommended_percent"] == recommended, group
+                    assert all(row["before_total"] == input_tokens + 5 for row in statistics["recent"])
+                    observation_cases.append({"reported_before_total": input_tokens + 5, "history_prefix_preserved": True,
+                        "cold_restart": True, "statistics": statistics})
+                    rpc = await start()
+                await stop()
+                statistics_file = home / "context-menu/compaction-observations.sqlite3"
+                with sqlite3.connect(statistics_file) as connection:
+                    assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                    payloads = [json.loads(row[0]) for row in connection.execute("SELECT payload FROM samples")]
+                    assert all("chat_text" not in row and "content" not in row for row in payloads)
+                    assert all(not str(directory) in json.dumps(row) for row in payloads)
+                assert statistics_file.stat().st_mode & 0o777 == 0o600
+                result["compaction_observations"] = {"cases": observation_cases, "database_integrity": True,
+                    "numeric_metadata_only": True, "private_permissions": True, "cleaned_after_run": True}
+                assert before == {str(file): hashlib.sha256(file.read_bytes()).hexdigest() for file in protected}
+                result["protected_config_and_official_binary_unchanged"] = True
                 result["passed"] = True
             except Exception as error:
                 result["error"] = f"{type(error).__name__}: {error}"
@@ -326,4 +377,5 @@ trust_level = "trusted"
     return result["passed"]
 
 
-raise SystemExit(0 if asyncio.run(run()) else 1)
+if __name__ == "__main__":
+    raise SystemExit(0 if asyncio.run(run()) else 1)

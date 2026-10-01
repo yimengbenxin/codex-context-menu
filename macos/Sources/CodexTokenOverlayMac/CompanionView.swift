@@ -119,6 +119,24 @@ struct ContextSettingsView: View {
                                 .frame(maxWidth: .infinity, minHeight: 240)
                         } else if let status = model.status {
                             strategy(status)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("自动压缩线").font(.headline)
+                                HStack {
+                                    TextField("官方默认", text: $model.compactionInput)
+                                        .textFieldStyle(.roundedBorder).frame(width: 120)
+                                        .accessibilityLabel("自动压缩百分比").disabled(model.saving)
+                                    Text("% · 上限99%，留空跟随官方").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if model.compactionWarning {
+                                    Text("超过90%可能在单轮对话中越过压缩线，请留意上下文余量。")
+                                        .font(.caption).foregroundStyle(.red)
+                                }
+                                if let validation = model.compactionValidation {
+                                    Text(validation).font(.caption).foregroundStyle(.red)
+                                }
+                                Text("压缩线不超过模型原始上限的90%；自适应升档后会重新限幅。自定义时，最近运行窗口会随触发线调整。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             activation(status)
                             DisclosureGroup("生效规则与范围") {
                                 VStack(alignment: .leading, spacing: 9) {
@@ -288,6 +306,11 @@ struct ContextSettingsView: View {
                 HStack { Text("最近软预算"); Spacer(); Text("\(target.formatted()) tokens").monospacedDigit() }
                     .font(.caption).foregroundStyle(.secondary)
             }
+            DisclosureGroup("本地压缩观测与推荐") {
+                CompactionStatisticsView(statistics: model.compactionStatistics)
+                if let error = model.statisticsError { Text(error).font(.caption).foregroundStyle(.orange) }
+                Button("刷新压缩统计") { model.refreshStatistics() }.disabled(model.statisticsBusy)
+            }
         }
     }
 
@@ -300,6 +323,38 @@ struct ContextSettingsView: View {
         case .adaptive: return "自动压缩成功后，依据保留比例决定是否升档；新档位在下一轮加载。手动压缩或失败不升档。"
         case .custom: return "输入整数 K。留空恢复默认，不修改官方压缩模型或推理强度。"
         }
+    }
+}
+
+struct CompactionStatisticsView: View {
+    let statistics: CompactionStatistics?
+    private func tokens(_ value: Int64?) -> String {
+        value.map { (Double($0) / 1000).formatted(.number.precision(.fractionLength(1))) + "K" } ?? "未知"
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("仅在本机记录数字，不上传聊天、代码或凭据。预算越线指超过你设置的上下文预算；超过压缩触发线属于正常触发，不等于越过预算。用量为最近报告值，非压缩请求精确输入；统计仅覆盖已记录可测样本，不代表完整历史或未来概率。")
+            if let statistics {
+                Text("\(statistics.model) · 当前已保存预算 \(tokens(statistics.budget))")
+                if let error = statistics.error { Text(error).foregroundStyle(.orange) }
+                if statistics.groups.isEmpty { Text("尚无压缩样本。运行组件加载后开始记录，不倒填或伪造历史。") }
+                ForEach(Array(statistics.groups.enumerated()), id: \.offset) { _, group in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(group.percent.map { "\($0)%触发线" } ?? "官方默认（触发线未报告）").fontWeight(.semibold)
+                        Text(group.scope == "body_after_prefix" ? "完整窗口检查" : (group.scope == "total" ? "总量触发检查" : "检查范围未报告"))
+                        Text("自动成功 \(group.automatic) 次 · 可测 \(group.measured) 次 · 未知 \(group.unknown) 次 · 手动 \(group.manual) 次 · 失败/未完成 \(group.failed) 次")
+                        Text("观测预算越线率：\(group.observed_rate.map { ($0 * 100).formatted(.number.precision(.fractionLength(1))) + "%" } ?? "未知")（\(group.crossed)/\(group.measured)） · 越线均值 \(tokens(group.mean_excess)) · P95 \(tokens(group.p95_excess))")
+                        Text("触发线超过量P95 \(tokens(group.trigger_p95_excess))（\(group.trigger_crossed ?? 0)/\(group.trigger_measured ?? 0)）；超过触发线不是失败。")
+                        if let recommended = group.recommended_percent {
+                            Text("参考建议 \(recommended)%：出现预算越线时，按触发线超过量P95预留空间；未出现时不因正常触发而下调。建议不保证未来不越线，不会自动修改设置。")
+                        } else { Text("至少10条可测样本且覆盖率达80%才给建议；官方默认触发线未知时不推荐。") }
+                    }
+                }
+                ForEach(Array(statistics.recent.prefix(5).enumerated()), id: \.offset) { _, sample in
+                    Text("\(Date(timeIntervalSince1970: Double(sample.at) / 1000).formatted(date: .omitted, time: .standard)) · 前输入 \(tokens(sample.before_input)) / 前总量 \(tokens(sample.before_total)) → 后总量 \(tokens(sample.after_total)) · \(Double(sample.duration_ms) / 1000, specifier: "%.1f")秒\(sample.manual ? " · 手动" : "") · \(sample.status == "completed" ? "完成" : "失败/未完成")")
+                }
+            } else { Text("统计尚未读取，请刷新。") }
+        }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 8)
     }
 }
 

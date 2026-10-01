@@ -4,7 +4,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
-import {BudgetStore, modelBounds} from './policy.mjs';
+import {BudgetStore, modelBounds, compactionPolicy} from './policy.mjs';
 import {resumeSettings} from './resume-settings.mjs';
 
 const execute = promisify(execFile);
@@ -34,13 +34,17 @@ export class AdaptiveController {
     this.writes = Promise.resolve();
   }
 
-  async projectSettings(cwd, threadID) {
+  python() {
     const python = [process.env.CODEX_CONTEXT_PYTHON, '/opt/homebrew/bin/python3', '/usr/local/bin/python3',
       path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3')]
       .find(candidate => candidate && fs.existsSync(candidate));
     if (!python) throw new Error('Context configuration runtime is unavailable');
+    return python;
+  }
+
+  async projectSettings(cwd, threadID) {
     const command = threadID ? ['thread-status', cwd, threadID] : ['status', cwd];
-    const {stdout} = await execute(python, ['-B', path.join(resources, 'context_config.py'), ...command],
+    const {stdout} = await execute(this.python(), ['-B', path.join(resources, 'context_config.py'), ...command],
       {timeout: 20000, maxBuffer: 1024 * 1024});
     return JSON.parse(stdout);
   }
@@ -53,21 +57,24 @@ export class AdaptiveController {
     const effective = await this.request('config/read', {cwd, includeLayers: false});
     const adaptive = settings.override ? settings.adaptive : settings.effective_adaptive ?? settings.adaptive;
     const bounds = modelBounds(this.catalog(), model, adaptive ? settings.adaptive_options : undefined);
-    const revision = settings.override ? settings.revision : settings.project_revision ?? settings.revision;
+    const revision = settings.override ? settings.budget_revision ?? settings.revision : settings.project_budget_revision ?? settings.budget_revision ?? settings.project_revision ?? settings.revision;
     const state = adaptive ? this.store.get(key, revision, bounds) : null;
     const budget = state?.budget ?? (settings.override ? settings.window : effective.config.model_context_window) ?? null;
     const compact = effective.config.model_auto_compact_token_limit ?? null;
-    const expected = Math.floor(Math.min(budget ?? bounds.tiers[0], bounds.maximum) * bounds.percent / 100);
+    const compression = compactionPolicy(bounds, budget, settings.compaction_percent,
+      compact, effective.config.model_auto_compact_token_limit_scope ?? 'total');
     return {key, root: settings.root, revision, bounds, state,
-      adaptive, budget, compact, expected, signature: JSON.stringify([budget, compact])};
+      ...compression, adaptive, budget, signature: JSON.stringify([compression.nativeBudget, compression.compact, compression.scope])};
   }
 
   configuration(context, previous = {}) {
     const config = {...previous};
     delete config.model_context_window;
     delete config.model_auto_compact_token_limit;
-    if (context.budget !== null) config.model_context_window = context.budget;
+    delete config.model_auto_compact_token_limit_scope;
+    if (context.nativeBudget !== null) config.model_context_window = context.nativeBudget;
     if (context.compact !== null) config.model_auto_compact_token_limit = context.compact;
+    config.model_auto_compact_token_limit_scope = context.scope;
     return config;
   }
 
@@ -147,7 +154,7 @@ export class AdaptiveController {
     this.sessions.set(result.thread.id, {...existing, cwd: result.cwd ?? result.thread.cwd,
       model: result.model, provider: result.modelProvider, configuration: original.params?.config,
       applied: JSON.stringify([original.params?.config?.model_context_window ?? null,
-        original.params?.config?.model_auto_compact_token_limit ?? null])});
+        original.params?.config?.model_auto_compact_token_limit ?? null, original.params?.config?.model_auto_compact_token_limit_scope ?? 'total'])});
   }
 
   observe(message) {

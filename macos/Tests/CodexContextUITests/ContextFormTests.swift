@@ -3,6 +3,36 @@ import AppKit
 @testable import CodexTokenOverlayMac
 
 final class ContextFormTests: XCTestCase {
+    @MainActor
+    func testCompactionWarningAndModelSafetyLimit() throws {
+        let raw = Data("""
+        {"root":"/project","path":"/settings","revision":"r","adaptive":false,"adaptive_available":true,"trusted":true,"inherited":[],
+        "adaptive_preview":{"model":"fixture","tiers":[272000,572000,872000],"maximum":872000,"percent":95}}
+        """.utf8)
+        let model = ContextSettingsModel()
+        model.status = try JSONDecoder().decode(ProjectContextStatus.self, from: raw)
+        model.mode = .custom
+        model.input = "272"
+        model.compactionInput = "90"
+        XCTAssertFalse(model.compactionWarning)
+        model.compactionInput = "91"
+        XCTAssertTrue(model.compactionWarning)
+        XCTAssertNil(model.compactionValidation)
+        model.compactionInput = "99"
+        XCTAssertNil(model.compactionValidation)
+        model.compactionInput = "100"
+        XCTAssertNotNil(model.compactionValidation)
+        let limited = String(decoding: raw, as: UTF8.self).replacingOccurrences(of: "\"percent\":95", with: "\"percent\":95,\"compaction\":{\"budget\":870000,\"maximum_percent\":90}")
+        model.status = try JSONDecoder().decode(ProjectContextStatus.self, from: Data(limited.utf8))
+        model.mode = .default
+        model.compactionInput = "95"
+        XCTAssertNotNil(model.compactionValidation)
+        model.compactionInput = "90"
+        XCTAssertNil(model.compactionValidation)
+        model.compactionInput = ""
+        XCTAssertFalse(model.compactionWarning)
+        XCTAssertNil(model.compactionValidation)
+    }
     private let defaults = AdaptiveOptions(lower_percent: 35, upper_percent: 55)
     func testAdaptiveInputsValidateThresholdsAndOrderedOptionalTiers() throws {
         let selected = try AdaptiveOptions.parse(lower: "30", upper: "50", tiers: ["272", "485", "872"], defaults: defaults)
@@ -159,5 +189,75 @@ final class ContextFormTests: XCTestCase {
         XCTAssertTrue(model.canSave)
         model.loading = true
         XCTAssertFalse(model.canSave)
+    }
+
+    @MainActor
+    func testStatisticsPreserveUnknownValuesAndSettingsDraft() async throws {
+        let data = Data("""
+        {"model":"fixture","budget":272000,"groups":[{"percent":95,"samples":12,"automatic":10,
+        "manual":1,"failed":1,"measured":10,"unknown":0,"crossed":3,"observed_rate":0.3,
+        "mean_excess":5000,"p95_excess":5000,"recommended_percent":93}],
+        "recent":[{"at":1000,"percent":null,"before_input":null,"before_total":null,"after_total":90000,
+        "duration_ms":1000,"status":"completed","manual":false}]}
+        """.utf8)
+        let model = ContextSettingsModel()
+        model.mode = .custom
+        model.input = "485"
+        model.compactionInput = "99"
+        model.compactionStatistics = try JSONDecoder().decode(CompactionStatistics.self, from: data)
+        XCTAssertEqual(model.compactionStatistics?.groups.first?.recommended_percent, 93)
+        XCTAssertNil(model.compactionStatistics?.recent.first?.before_total)
+        XCTAssertEqual(model.input, "485")
+        XCTAssertEqual(model.compactionInput, "99")
+        XCTAssertEqual(model.mode, .custom)
+    }
+
+    @MainActor
+    func testStatisticsRefreshPreservesDraftOnSuccessAndFailure() async throws {
+        let data = Data("""
+        {"root":"/project","path":"/project/.codex/config.toml","revision":"first",
+        "adaptive":false,"adaptive_available":true,"trusted":true,"inherited":[],
+        "compaction_statistics":{"model":"fixture","budget":272000,"groups":[],"recent":[]}}
+        """.utf8)
+        let result = try JSONDecoder().decode(ProjectContextStatus.self, from: data)
+        let model = ContextSettingsModel()
+        model.project = "/project"
+        model.status = result
+        model.mode = .custom
+        model.input = "485"
+        model.compactionInput = "99"
+        await model.refreshStatistics(reader: { arguments in
+            XCTAssertEqual(arguments, ["status", "/project"])
+            return result
+        })?.value
+        XCTAssertEqual(model.compactionStatistics?.budget, 272000)
+        XCTAssertNil(model.statisticsError)
+        await model.refreshStatistics(reader: { _ in
+            throw NSError(domain: "Fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "read failed"])
+        })?.value
+        XCTAssertEqual(model.compactionStatistics?.budget, 272000)
+        XCTAssertTrue(model.statisticsError?.contains("read failed") == true)
+        XCTAssertFalse(model.statisticsBusy)
+        XCTAssertEqual(model.mode, .custom)
+        XCTAssertEqual(model.input, "485")
+        XCTAssertEqual(model.compactionInput, "99")
+    }
+
+    @MainActor
+    func testStatisticsRefreshDiscardsOldTargetResponse() async throws {
+        let data = Data("""
+        {"root":"/project","path":"/project/.codex/config.toml","revision":"first",
+        "adaptive":false,"adaptive_available":true,"trusted":true,"inherited":[],
+        "compaction_statistics":{"model":"fixture","budget":272000,"groups":[],"recent":[]}}
+        """.utf8)
+        let result = try JSONDecoder().decode(ProjectContextStatus.self, from: data)
+        let model = ContextSettingsModel()
+        model.project = "/project"
+        model.status = result
+        let refresh = model.refreshStatistics(reader: { _ in result })
+        model.status = nil
+        await refresh?.value
+        XCTAssertNil(model.compactionStatistics)
+        XCTAssertFalse(model.statisticsBusy)
     }
 }
