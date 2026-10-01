@@ -7,7 +7,7 @@ BUNDLE_ID="local.wen.CodexContextMenu"
 MIN_SYSTEM_VERSION="14.0"
 ARCH="$(uname -m)"
 CONFIGURATION="release"
-VERSION="0.6.8"
+VERSION="0.6.9"
 OUTPUT_DIR=""
 
 usage() {

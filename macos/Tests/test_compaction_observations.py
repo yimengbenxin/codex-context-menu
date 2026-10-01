@@ -11,6 +11,7 @@ import tempfile
 import unittest
 
 FILE = Path(__file__).resolve().parents[1] / "Resources/compaction_observations.py"
+sys.path.insert(0, str(FILE.parent))
 SPEC = importlib.util.spec_from_file_location("observations", FILE)
 observations = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(observations)
@@ -21,6 +22,12 @@ class CompactionObservationTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.home = Path(temporary.name)
+        rollout = self.home / "sessions/fixture.jsonl"
+        rollout.parent.mkdir()
+        rollout.write_text(json.dumps({"timestamp": "1970-01-01T00:00:00Z", "type": "session_meta", "payload": {}}) + "\n")
+        with sqlite3.connect(self.home / "state_5.sqlite") as connection:
+            connection.execute("CREATE TABLE threads(id TEXT, rollout_path TEXT)")
+            connection.executemany("INSERT INTO threads VALUES(?,?)", [(name, str(rollout)) for name in ("first", "second")])
 
     def row(self, index, **changes):
         return {"id": str(index), "project": hashlib.sha256(b"/project").hexdigest(), "thread": "first", "model": "fixture",
@@ -86,11 +93,13 @@ class CompactionObservationTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), b"untouched")
 
     def test_recommendation_respects_maximum_and_coverage(self):
-        rows = [self.row(index) for index in range(10)]
+        def estimated(row):
+            return {**row, "accounting": observations.reconstruct(self.home, [row]).get(row["id"])}
+        rows = [estimated(self.row(index)) for index in range(10)]
         self.assertEqual(observations.summarize(rows, 90)[0]["recommended_percent"], 90)
         rows.extend(self.row(index, before_total=None) for index in range(10, 15))
         self.assertIsNone(observations.summarize(rows, 99)[0]["recommended_percent"])
-        normal = observations.summarize([self.row(index, before_total=270000) for index in range(10)], 99)[0]
+        normal = observations.summarize([estimated(self.row(index, before_total=270000)) for index in range(10)], 99)[0]
         self.assertEqual(normal["trigger_crossed"], 10)
         self.assertEqual(normal["crossed"], 0)
         self.assertEqual(normal["recommended_percent"], 95)
@@ -115,3 +124,60 @@ class CompactionObservationTests(unittest.TestCase):
         for change in ({"before_total": -1}, {"before_total": True}, {"at": None}, {"duration_ms": None}, {"percent": 100}):
             with self.assertRaises(ValueError):
                 observations.record(self.home, self.row(10006, **change))
+
+    def test_missing_history_is_not_reported_as_zero_percent(self):
+        (self.home / "sessions/fixture.jsonl").unlink()
+        observations.record(self.home, self.row(0, before_total=234085))
+        group = self.report()["groups"][0]
+        self.assertEqual((group["reported_available"], group["measured"], group["unknown"]), (1, 0, 1))
+        self.assertIsNone(group["observed_rate"])
+        self.assertIsNone(group["p95_excess"])
+        self.assertIsNone(group["recommended_percent"])
+
+    def test_legacy_rows_rebuild_without_mutating_stored_reported_usage(self):
+        observations.record(self.home, self.row(1000, before_total=234085))
+        with sqlite3.connect(observations.database_path(self.home)) as connection:
+            legacy = self.row(1000, before_total=234085)
+            connection.execute("UPDATE samples SET payload=?", (json.dumps(legacy),))
+        self.append_history("reasoning", encrypted_content="a" * 152082)
+        self.append_history("message", role="user", content=[{"type": "input_text", "text": "current"}])
+        self.append_history("custom_tool_call", name="exec", input="")
+        self.append_history("custom_tool_call_output", call_id="", output=[{"type": "input_text", "text": "a" * 460}])
+        report = self.report()
+        accounting = report["recent"][0]["accounting"]
+        self.assertEqual(accounting["pending_local"], 115)
+        self.assertEqual(accounting["history_reasoning"], 28353)
+        self.assertEqual(accounting["upper_total"], 262553)
+        self.assertEqual(report["groups"][0]["trigger_p95_excess"], 4153)
+        with sqlite3.connect(observations.database_path(self.home)) as connection:
+            self.assertEqual(json.loads(connection.execute("SELECT payload FROM samples").fetchone()[0]), legacy)
+
+    def test_new_samples_persist_numeric_estimates_without_changing_source(self):
+        self.append_history("reasoning", encrypted_content="a" * 152082)
+        self.append_history("message", role="user", content=[{"type": "input_text", "text": "current"}])
+        self.append_history("custom_tool_call", name="exec", input="private")
+        self.append_history("custom_tool_call_output", call_id="", output=[{"type": "input_text", "text": "a" * 460}])
+        rollout = self.home / "sessions/fixture.jsonl"
+        original = rollout.read_bytes()
+        observations.record(self.home, self.row(1000, before_total=234085))
+        with sqlite3.connect(observations.database_path(self.home)) as connection:
+            payload = connection.execute("SELECT payload FROM samples").fetchone()[0]
+        self.assertEqual(json.loads(payload)["accounting"]["upper_total"], 262553)
+        self.assertNotIn("private", payload)
+        self.assertNotIn("a" * 100, payload)
+        self.assertEqual(rollout.read_bytes(), original)
+        self.assertEqual(self.report()["recent"][0]["accounting"]["pending_local"], 115)
+
+    def append_history(self, kind, **payload):
+        with (self.home / "sessions/fixture.jsonl").open("a") as stream:
+            stream.write(json.dumps({"timestamp": "1970-01-01T00:00:00.500Z", "type": "response_item", "payload": {"type": kind, **payload}}) + "\n")
+
+    def test_unsupported_tail_and_rollback_leave_estimate_unknown(self):
+        self.append_history("custom_tool_call_output", output=[{"type": "input_image", "image_url": "private"}])
+        observations.record(self.home, self.row(1000))
+        self.assertIsNone(self.report()["recent"][0]["accounting"])
+        with (self.home / "sessions/fixture.jsonl").open("a") as stream:
+            stream.write(json.dumps({"timestamp": "1970-01-01T00:00:00.600Z", "type": "event_msg", "payload": {"type": "thread_rolled_back"}}) + "\n")
+        self.append_history("custom_tool_call", name="exec", input="")
+        observations.record(self.home, self.row(1001))
+        self.assertIsNone(self.report()["recent"][0]["accounting"])

@@ -196,9 +196,12 @@ final class ContextFormTests: XCTestCase {
         let data = Data("""
         {"model":"fixture","budget":272000,"groups":[{"percent":95,"samples":12,"automatic":10,
         "manual":1,"failed":1,"measured":10,"unknown":0,"crossed":3,"observed_rate":0.3,
+        "reported_available":10,"uncompensated_rate":0.0,
         "mean_excess":5000,"p95_excess":5000,"recommended_percent":93}],
         "recent":[{"at":1000,"percent":null,"before_input":null,"before_total":null,"after_total":90000,
-        "duration_ms":1000,"status":"completed","manual":false}]}
+        "duration_ms":1000,"status":"completed","manual":false,
+        "accounting":{"basis":"conditional_history_replay_v1","pending_local":115,"history_reasoning":28352,
+        "lower_total":234200,"upper_total":262552}}]}
         """.utf8)
         let model = ContextSettingsModel()
         model.mode = .custom
@@ -207,6 +210,8 @@ final class ContextFormTests: XCTestCase {
         model.compactionStatistics = try JSONDecoder().decode(CompactionStatistics.self, from: data)
         XCTAssertEqual(model.compactionStatistics?.groups.first?.recommended_percent, 93)
         XCTAssertNil(model.compactionStatistics?.recent.first?.before_total)
+        XCTAssertEqual(model.compactionStatistics?.recent.first?.accounting?.upper_total, 262552)
+        XCTAssertEqual(model.compactionStatistics?.groups.first?.uncompensated_rate, 0)
         XCTAssertEqual(model.input, "485")
         XCTAssertEqual(model.compactionInput, "99")
         XCTAssertEqual(model.mode, .custom)

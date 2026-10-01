@@ -6,12 +6,12 @@ final class UsageReportTests: XCTestCase {
         let raw = Data("""
         {"provider":"codex","source":"oauth","usage":{"primary":null,
         "secondary":{"usedPercent":6,"windowMinutes":10080,"resetsAt":"2026-10-07T00:00:00Z"},
-        "accountEmail":"someone@example.com","updatedAt":"2026-09-30T00:00:00Z"}}
+        "accountEmail":"someone@example.invalid","updatedAt":"2026-09-30T00:00:00Z"}}
         """.utf8)
         let report = try JSONDecoder().decode(CodexQuotaReport.self, from: raw)
         XCTAssertNil(report.usage?.primary)
         XCTAssertEqual(report.usage?.secondary?.remainingPercent, 94)
-        XCTAssertEqual(report.usage?.redactedAccount, "s•••@example.com")
+        XCTAssertEqual(report.usage?.redactedAccount, "s•••@example.invalid")
     }
 
     func testPartialHistoryAndCachedTokensStaySeparate() throws {

@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as temporary:
     import plistlib
     assert plistlib.loads((app / "Contents/Info.plist").read_bytes())["CFBundleShortVersionString"] == version
     resources = app / "Contents/Resources"
-    for name in ("compaction_observations.py", "adaptive/compaction-observer.mjs", "adaptive_preview.py"):
+    for name in ("compaction_accounting.py", "compaction_observations.py", "adaptive/compaction-observer.mjs", "adaptive_preview.py"):
         assert (resources / name).read_bytes() == (root / "macos/Resources" / name).read_bytes()
     assert (folder / "Applications").is_symlink()
     executable = app / "Contents/MacOS/CodexTokenOverlayMac"
@@ -54,5 +54,6 @@ with tempfile.TemporaryDirectory() as temporary:
     canary = json.loads(output.read_text())
     assert canary["passed"] and canary["protected_config_and_official_binary_unchanged"]
     assert len(canary["compaction_observations"]["cases"]) == 2
+    assert all(sample.get("accounting") for case in canary["compaction_observations"]["cases"] for sample in case["statistics"]["recent"])
 print(json.dumps({"zip_signature_verified": True, "installer_present": True, "private_runtime_files_absent": True,
     "personal_build_paths_absent": True, "unintegrated_and_legacy_native_fallback": True, "packaged_native_canary": True}))

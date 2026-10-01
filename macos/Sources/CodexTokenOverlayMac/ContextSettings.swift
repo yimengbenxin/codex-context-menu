@@ -21,8 +21,17 @@ struct CompactionStatistics: Decodable, Sendable {
         let trigger_measured: Int?
         let trigger_p95_excess: Int64?
         let recommended_percent: Int?
+        let reported_available: Int?
+        let uncompensated_rate: Double?
     }
     struct Sample: Decodable, Sendable {
+        struct Accounting: Decodable, Sendable {
+            let basis: String
+            let pending_local: Int64
+            let history_reasoning: Int64
+            let lower_total: Int64
+            let upper_total: Int64
+        }
         let at: Int64
         let percent: Int?
         let before_input: Int64?
@@ -31,6 +40,7 @@ struct CompactionStatistics: Decodable, Sendable {
         let duration_ms: Int64
         let status: String
         let manual: Bool
+        let accounting: Accounting?
     }
     let model: String
     let budget: Int64

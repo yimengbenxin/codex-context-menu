@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-version="${1:-0.6.8}"
-[[ "$version" == 0.6.8 ]] || { echo 'Use a reviewed compatibility manifest before releasing another version' >&2; exit 1; }
+version="${1:-0.6.9}"
+reviewed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["release"])' "$root/macos/Resources/adaptive/compatibility.json")"
+[[ "$version" == "$reviewed" ]] || { echo 'Use a reviewed compatibility manifest before releasing another version' >&2; exit 1; }
 cd "$root"
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/codex-context-release.XXXXXX")"
 trap 'rm -rf "$temporary"' EXIT

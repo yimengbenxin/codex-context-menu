@@ -333,25 +333,31 @@ struct CompactionStatisticsView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("仅在本机记录数字，不上传聊天、代码或凭据。预算越线指超过你设置的上下文预算；超过压缩触发线属于正常触发，不等于越过预算。用量为最近报告值，非压缩请求精确输入；统计仅覆盖已记录可测样本，不代表完整历史或未来概率。")
+            Text("只读本地日志重建长度，只保存数字，不保存或上传正文、代码或凭据。最近报告用量不等于内核触发计数：另估算新增工具结果与历史加密推理。服务端是否已计入历史推理未报告，因此同时列出不补计 / 补计两种估算；不是精确值或严格置信区间。")
             if let statistics {
                 Text("\(statistics.model) · 当前已保存预算 \(tokens(statistics.budget))")
                 if let error = statistics.error { Text(error).foregroundStyle(.orange) }
                 if statistics.groups.isEmpty { Text("尚无压缩样本。运行组件加载后开始记录，不倒填或伪造历史。") }
                 ForEach(Array(statistics.groups.enumerated()), id: \.offset) { _, group in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(group.percent.map { "\($0)%触发线" } ?? "官方默认（触发线未报告）").fontWeight(.semibold)
+                        Text(group.percent.map { "\($0)%设置目标（不是触发用量实测）" } ?? "官方默认（触发线未报告）").fontWeight(.semibold)
                         Text(group.scope == "body_after_prefix" ? "完整窗口检查" : (group.scope == "total" ? "总量触发检查" : "检查范围未报告"))
-                        Text("自动成功 \(group.automatic) 次 · 可测 \(group.measured) 次 · 未知 \(group.unknown) 次 · 手动 \(group.manual) 次 · 失败/未完成 \(group.failed) 次")
-                        Text("观测预算越线率：\(group.observed_rate.map { ($0 * 100).formatted(.number.precision(.fractionLength(1))) + "%" } ?? "未知")（\(group.crossed)/\(group.measured)） · 越线均值 \(tokens(group.mean_excess)) · P95 \(tokens(group.p95_excess))")
-                        Text("触发线超过量P95 \(tokens(group.trigger_p95_excess))（\(group.trigger_crossed ?? 0)/\(group.trigger_measured ?? 0)）；超过触发线不是失败。")
+                        Text("自动成功 \(group.automatic) 次 · 有报告 \(group.reported_available ?? 0) 次 · 可重建 \(group.measured) 次 · 未知 \(group.unknown) 次 · 手动 \(group.manual) 次 · 失败/未完成 \(group.failed) 次")
+                        Text("估算预算越线率（补计历史推理）：\(group.observed_rate.map { ($0 * 100).formatted(.number.precision(.fractionLength(1))) + "%" } ?? "未知")（\(group.crossed)/\(group.measured)） · 估算越线均值 \(tokens(group.mean_excess)) · P95 \(tokens(group.p95_excess))")
+                        Text("不补计历史推理的估算越线率：\(group.uncompensated_rate.map { ($0 * 100).formatted(.number.precision(.fractionLength(1))) + "%" } ?? "未知")。预算越线指超过保存预算，不等于超过设置目标。")
+                        Text("估算设置目标超过量P95 \(tokens(group.trigger_p95_excess))（\(group.trigger_crossed ?? 0)/\(group.trigger_measured ?? 0)，含推理补计）；不是实际触发原因的归因。")
                         if let recommended = group.recommended_percent {
-                            Text("参考建议 \(recommended)%：出现预算越线时，按触发线超过量P95预留空间；未出现时不因正常触发而下调。建议不保证未来不越线，不会自动修改设置。")
-                        } else { Text("至少10条可测样本且覆盖率达80%才给建议；官方默认触发线未知时不推荐。") }
+                            Text("估算参考建议 \(recommended)%：按含推理补计估算的目标超过量P95预留空间。依赖补计假设，不代表实际越线概率，不保证未来不越线，不自动修改设置。")
+                        } else { Text("至少10条可重建样本且覆盖率达80%才给估算建议；未知样本不算成未越线，未重建时不展示0%。") }
                     }
                 }
                 ForEach(Array(statistics.recent.prefix(5).enumerated()), id: \.offset) { _, sample in
-                    Text("\(Date(timeIntervalSince1970: Double(sample.at) / 1000).formatted(date: .omitted, time: .standard)) · 前输入 \(tokens(sample.before_input)) / 前总量 \(tokens(sample.before_total)) → 后总量 \(tokens(sample.after_total)) · \(Double(sample.duration_ms) / 1000, specifier: "%.1f")秒\(sample.manual ? " · 手动" : "") · \(sample.status == "completed" ? "完成" : "失败/未完成")")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(Date(timeIntervalSince1970: Double(sample.at) / 1000).formatted(date: .omitted, time: .standard)) · 报告前输入 \(tokens(sample.before_input)) / 合计 \(tokens(sample.before_total)) → 报告后合计 \(tokens(sample.after_total)) · \(Double(sample.duration_ms) / 1000, specifier: "%.1f")秒\(sample.manual ? " · 手动" : "") · \(sample.status == "completed" ? "完成" : "失败/未完成")")
+                        if let accounting = sample.accounting {
+                            Text("重建估算约 \(tokens(accounting.lower_total))–\(tokens(accounting.upper_total))（不补计 / 补计历史推理） · 新增本地结果约 \(tokens(accounting.pending_local)) · 历史推理约 \(tokens(accounting.history_reasoning))；未取得内核精确计数。")
+                        } else { Text("重建估算未知：本地日志不足或包含无法重建的项目；报告值保留，但不参与估算统计。") }
+                    }
                 }
             } else { Text("统计尚未读取，请刷新。") }
         }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 8)
