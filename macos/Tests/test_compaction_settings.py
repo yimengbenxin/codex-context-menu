@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ RESOURCES = Path(__file__).resolve().parents[1] / "Resources"
 SPEC = importlib.util.spec_from_file_location("compaction_backend", RESOURCES / "context_config.py")
 backend = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(backend)
+import adaptive_preview
 FIRST = "11111111-1111-4111-8111-111111111111"
 SECOND = "22222222-2222-4222-8222-222222222222"
 
@@ -33,6 +35,8 @@ class CompactionSettingsTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, {"CODEX_HOME": str(self.home)}).start()
         patch.object(backend, "adaptive_status", return_value={"adaptive": True}).start()
+        patch.object(adaptive_preview.runtime_probe, "discover", return_value=("fixture-cli", shutil.which("node"))).start()
+        patch.object(adaptive_preview.runtime_probe, "verify_identity", side_effect=lambda binary, node: (binary, node)).start()
 
     def project(self):
         return backend.status(self.root)
