@@ -87,3 +87,32 @@ test('malformed notifications never throw into the native transport', async () =
   await observer.writes;
   assert.equal(rows.length, 1);
 });
+
+test('adaptive feedback freezes completion usage rather than later turn usage', async () => {
+  const {observer, event, usage, item, session} = fixture();
+  session.context.adaptive = true;
+  usage(250000);
+  event('item/started', {item});
+  usage(60000);
+  event('item/completed', {item});
+  usage(190000);
+  event('item/completed', {item});
+  await observer.writes;
+  assert.equal(session.compactionSamples.length, 1);
+  assert.deepEqual(session.compactionSamples.map(({id, ...sample}) => sample), [{retained: 60000, successful: true, manual: false}]);
+  assert.equal(session.compactionSamples[0].id.length, 64);
+});
+
+test('wrong-window and missing post-compaction values cannot become low samples', async () => {
+  const {observer, event, usage, item, session} = fixture();
+  session.context.adaptive = true;
+  usage(250000);
+  event('item/started', {item});
+  usage(10000, 460750);
+  event('item/completed', {item});
+  event('item/started', {item: {...item, id: 'failed'}});
+  event('turn/completed', {turn: {status: 'failed'}});
+  await observer.writes;
+  assert.deepEqual(session.compactionSamples.map(({id, ...sample}) => sample), [
+    {retained: null, successful: true, manual: false}, {retained: null, successful: false, manual: false}]);
+});

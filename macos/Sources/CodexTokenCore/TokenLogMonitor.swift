@@ -277,7 +277,11 @@ public final class TokenLogMonitor {
                     contextUsedTokens: integer(last["total_tokens"]),
                     contextWindowTokens: integer(info["model_context_window"]),
                     updatedAt: modificationDate,
-                    targetContextBudgetTokens: info["target_context_budget_tokens"] is NSNumber ? integer(info["target_context_budget_tokens"]) : nil
+                    targetContextBudgetTokens: info["target_context_budget_tokens"] is NSNumber ? integer(info["target_context_budget_tokens"]) : nil,
+                    lastInputTokens: (last["input_tokens"] as? NSNumber)?.int64Value,
+                    lastCachedInputTokens: (last["cached_input_tokens"] as? NSNumber)?.int64Value,
+                    lastOutputTokens: (last["output_tokens"] as? NSNumber)?.int64Value,
+                    lastReasoningOutputTokens: (last["reasoning_output_tokens"] as? NSNumber)?.int64Value
                 )
             } catch {
                 // 最后一行可能尚未写完，继续寻找前一个完整快照。

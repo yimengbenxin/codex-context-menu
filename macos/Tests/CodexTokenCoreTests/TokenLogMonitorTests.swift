@@ -2,6 +2,24 @@ import XCTest
 @testable import CodexTokenCore
 
 final class TokenLogMonitorTests: XCTestCase {
+    func testLatestRequestCountersAreDistinctFromSessionCumulativeUsage() throws {
+        let text = """
+        {"type":"event_msg","payload":{"type":"token_count","info":{
+        "total_token_usage":{"input_tokens":10000,"cached_input_tokens":9000,"output_tokens":1000,"reasoning_output_tokens":400,"total_tokens":11000},
+        "last_token_usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120},"model_context_window":258400}}}
+        """.replacingOccurrences(of: "\n", with: "")
+        let snapshot = try XCTUnwrap(TokenLogMonitor.parseLatestTokenSnapshot(text: text, path: "/fixture/log.jsonl", modificationDate: Date()))
+        XCTAssertEqual(snapshot.inputTokens, 10000)
+        XCTAssertEqual(snapshot.lastInputTokens, 100)
+        XCTAssertEqual(snapshot.lastCachedInputTokens, 60)
+        XCTAssertEqual(snapshot.lastOutputTokens, 20)
+        XCTAssertEqual(snapshot.lastReasoningOutputTokens, 5)
+        let legacy = text.replacingOccurrences(of: "\"input_tokens\":100,\"cached_input_tokens\":60,\"output_tokens\":20,\"reasoning_output_tokens\":5,", with: "")
+        let unknown = try XCTUnwrap(TokenLogMonitor.parseLatestTokenSnapshot(text: legacy, path: "/fixture/log.jsonl", modificationDate: Date()))
+        XCTAssertNil(unknown.lastInputTokens)
+        XCTAssertNil(unknown.lastCachedInputTokens)
+    }
+
     private var temporaryRoot: URL!
 
     override func setUpWithError() throws {

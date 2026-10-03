@@ -21,7 +21,7 @@ NODE = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
 
 
 class InstallerTests(unittest.TestCase):
-    def exercise(self, fail=False, integrate_only=False, preserve_window=False):
+    def exercise(self, fail=False, integrate_only=False, preserve_window=False, background=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             home = root / "fresh-home"
@@ -65,7 +65,7 @@ class InstallerTests(unittest.TestCase):
                 return subprocess.CompletedProcess(arguments, 0, stdout=output, stderr="")
 
             with patch.dict(os.environ, {"HOME": str(home), "CODEX_HOME": str(home / ".codex")}), \
-                 patch.object(sys, "argv", [str(SCRIPT), str(candidate)] + (["--integrate-only"] if integrate_only else []) + (["--preserve-window"] if preserve_window else [])), \
+                 patch.object(sys, "argv", [str(SCRIPT), str(candidate)] + (["--integrate-only"] if integrate_only else []) + (["--preserve-window"] if preserve_window else []) + (["--background"] if background else [])), \
                  patch("runtime_probe.locate", return_value={"binary": OFFICIAL, "node": NODE,
                      "contract": "round-boundary-v1", "version": "fixture 0.159.0", "officialSha256": hashlib.sha256(fixtures[OFFICIAL]).hexdigest(),
                      "nodeSha256": hashlib.sha256(fixtures[NODE]).hexdigest()}), \
@@ -87,8 +87,7 @@ class InstallerTests(unittest.TestCase):
             else:
                 config = plistlib.loads(agent.read_bytes())
                 self.assertTrue(config["RunAtLoad"])
-                self.assertEqual(config["ProgramArguments"][0], str(application / "Contents/MacOS/CodexTokenOverlayMac"))
-                self.assertEqual(config["ProgramArguments"][1], "--background")
+                self.assertEqual(config["ProgramArguments"], ["/usr/bin/open", "-g", "-a", str(application), "--args", "--background"])
                 self.assertTrue((support / "backend").is_symlink())
                 self.assertTrue((support / "installation.json").exists())
                 manifest = json.loads((support / "official-adaptive-runtime.json").read_text())
@@ -96,9 +95,17 @@ class InstallerTests(unittest.TestCase):
                 self.assertNotIn("desktopEvidence", manifest)
                 if preserve_window:
                     self.assertFalse(any("bootstrap" in call or "/usr/bin/open" in call for call in calls))
+                elif background:
+                    self.assertTrue(any("bootstrap" in call for call in calls))
+                    self.assertFalse(any("--show-settings" in call for call in calls))
+                elif not integrate_only:
+                    self.assertTrue(any("--show-settings" in call for call in calls))
 
     def test_fresh_home_install_without_private_acceptance_files(self):
         self.exercise()
+
+    def test_background_update_does_not_open_settings(self):
+        self.exercise(background=True)
 
     def test_activation_failure_restores_previous_app_manifest_and_agent(self):
         self.exercise(fail=True)

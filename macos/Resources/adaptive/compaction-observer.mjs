@@ -34,7 +34,7 @@ export class CompactionObserver {
         window: count(params.tokenUsage?.modelContextWindow), model: session.model, at: this.clock()};
       this.usage.set(thread, usage);
       const pending = this.pending.get(thread);
-      if (pending) pending.after = usage.total;
+      if (pending) pending.after = usage.model === pending.row.model && usage.window === pending.expected ? usage.total : null;
     }
     if (message.method === 'item/started' && params.item?.type === 'contextCompaction' && session.context
         && typeof params.item.id === 'string' && typeof params.turnId === 'string') {
@@ -44,7 +44,7 @@ export class CompactionObserver {
       const reported = this.usage.get(thread);
       const known = reported?.model === context.bounds.model && reported?.window === context.expected;
       this.pending.set(thread, {item: params.item.id, turn: params.turnId,
-        start: this.clock(), after: null, row: {
+        start: this.clock(), after: null, expected: context.expected, row: {
           project: crypto.createHash('sha256').update(context.root).digest('hex'), thread,
           model: context.bounds.model, budget: context.budget ?? context.bounds.tiers[0],
           percent: context.effective_percent ?? null, scope: context.scope,
@@ -65,6 +65,9 @@ export class CompactionObserver {
     this.pending.delete(thread);
     const row = {...pending.row, id: crypto.createHash('sha256').update(JSON.stringify([thread, pending.turn, pending.item])).digest('hex'),
       status, at: pending.start, duration_ms: Math.max(0, this.clock() - pending.start), after_total: pending.after};
+    const session = this.controller.sessions.get(thread);
+    if (session?.context?.adaptive) (session.compactionSamples ??= []).push({id: row.id, retained: row.after_total,
+      successful: status === 'completed', manual: row.manual});
     this.writes = this.writes.then(() => this.write(row)).catch(() => {
       process.stderr.write('Compaction observations: local statistics could not be saved; conversation unaffected\n');
     });

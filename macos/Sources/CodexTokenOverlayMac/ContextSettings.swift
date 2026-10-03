@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import OSLog
 import CodexTokenCore
 
 struct CompactionStatistics: Decodable, Sendable {
@@ -182,20 +183,22 @@ final class ContextSettingsController: NSObject, NSWindowDelegate {
     var identifyCurrent: (() -> Void)?
     private var windowController: NSWindowController?
     private var pickerOpen = false
+    private let windowLogger = Logger(subsystem: "local.wen.CodexContextMenu", category: "window")
 
-    func present(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64? = nil, origin: ContextTargetOrigin = .link, title: String? = nil) {
-        showWindow()
+    func loadTarget(project: String, threadID: String?, observedWindow: Int64?, observedTarget: Int64? = nil, origin: ContextTargetOrigin = .link, title: String? = nil) {
         guard !model.saving else { return }
         model.page = .context
         model.load(project: project, threadID: threadID, observedWindow: observedWindow, observedTarget: observedTarget, origin: origin, title: title)
     }
 
     func chooseProject() {
-        showWindow()
-        if model.project == nil, let last = UserDefaults.standard.string(forKey: "contextSettings.lastProject"),
-           FileManager.default.fileExists(atPath: last) {
-            model.load(project: last, threadID: nil, observedWindow: nil, observedTarget: nil, scope: .project)
-        }
+        model.page = .context
+        showWindow(source: "context-command")
+    }
+
+    func showUsage() {
+        model.page = .usage
+        showWindow(source: "usage-command")
     }
 
     func identify() {
@@ -211,7 +214,7 @@ final class ContextSettingsController: NSObject, NSWindowDelegate {
         Task {
             do {
                 let target = try await Task.detached(priority: .userInitiated) { try ContextTarget.locate(link: link) }.value
-                present(project: target.project, threadID: target.threadID, observedWindow: nil)
+                loadTarget(project: target.project, threadID: target.threadID, observedWindow: nil)
             } catch {
                 model.failTarget(error.localizedDescription)
             }
@@ -219,14 +222,15 @@ final class ContextSettingsController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func showWindow() {
+    private func showWindow(source: String) {
+        windowLogger.info("Explicit window open: \(source, privacy: .public)")
         if windowController == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 710),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = "Codex 上下文"
             window.titlebarAppearsTransparent = true
             window.isReleasedWhenClosed = false
-            window.contentMinSize = NSSize(width: 780, height: 650)
+            window.contentMinSize = NSSize(width: 800, height: 540)
             window.delegate = self
             window.setFrameAutosaveName("CodexContextSettings")
             window.contentView = NSHostingView(rootView: CompanionView(model: model, usage: usage,
@@ -237,7 +241,7 @@ final class ContextSettingsController: NSObject, NSWindowDelegate {
         }
         windowController?.showWindow(nil)
         windowController?.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     private func selectFolder() {

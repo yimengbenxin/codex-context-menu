@@ -30,7 +30,7 @@ enum ContextTargetOrigin: String {
 
 enum ContextActivationCopy {
     static let initial = "首次安装并启用工具，或更新运行组件后，需完整退出并重新打开整个 Codex 一次；不是每个对话都要重启。"
-    static let nextTurn = "接入后，设置切换和自动升档在下一轮对话开始前加载，无需重启；不打断当前回复。"
+    static let nextTurn = "接入后，在下一轮普通对话、空闲时恢复目标任务或启动队列前加载，无需重启；不打断当前回复。向正在运行的目标任务追加消息不算新一轮，设置需等待安全加载边界。"
     static let saved = "设置已保存，将在下一轮尝试加载；请以运行窗口确认实际生效。"
 }
 
@@ -149,7 +149,6 @@ final class ContextSettingsModel: ObservableObject {
                 adopt(result)
                 if let selectedMode { mode = selectedMode }
                 integrationPending = false
-                UserDefaults.standard.set(result.root, forKey: "contextSettings.lastProject")
             } catch {
                 guard generation == request else { return }
                 self.error = error.localizedDescription

@@ -2,9 +2,9 @@
 
 一个原生 macOS 伴随工具：不用在聊天里发送配置指令，即可为 Codex 对话或项目选择上下文策略，并查看 Token 用量与账户额度。
 
-[下载试用版](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.9) · [反馈问题](https://github.com/yimengbenxin/codex-context-menu/issues) · [English](README.en.md)
+[下载试用版](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.16) · [反馈问题](https://github.com/yimengbenxin/codex-context-menu/issues) · [English](README.en.md)
 
-**非 OpenAI 官方产品，未获 OpenAI 背书。0.6.9 是兼容范围有限的实验性试用版，不是适用于所有 Codex 安装的通用补丁。**
+**非 OpenAI 官方产品，未获 OpenAI 背书。0.6.16 是兼容范围有限的实验性试用版，不是适用于所有 Codex 安装的通用补丁。**
 
 ## 为什么做这个工具
 
@@ -25,7 +25,9 @@
 | 下一轮加载 | 接入后，默认、自定义切换及自适应升档无需逐次重启 Codex |
 | 自动压缩线 | 支持1–99%的整数；超过90%显示红字，压缩目标不超过模型原始最大窗口的90% |
 | 本地压缩观测 | 记录数字用量、耗时与结果，区分预算越线、正常触发、未知及手动样本；达到样本要求后给保守建议，不自动应用 |
-| 用量概览 | 查看本地近七天 Token 统计，手动读取官方账户额度；自动额度刷新默认关闭 |
+| 用量概览 | 查看最近模型请求、对话累计、每日输入 / 输出 / 缓存 / 推理 / 命中率及 API 标价参考；支持近7天、近30天、本月和全部历史，包含每日模型与项目明细 |
+| 菜单栏用量 | 增加独立用量入口和最近请求 / 今日 / 官方额度快照；默认入口仍为上下文，不额外创建监控服务 |
+| 官方账户额度 | 读取官方窗口、重置时间、使用节奏、额外模型限制、可用 Credits 与费用快照（字段以实际返回为准）；自动刷新默认关闭，不读取浏览器 Cookie |
 | 安装与恢复 | 支持拖入应用后在窗口内完成接入；协议检查、旧安装备份、失败回滚及启动环境恢复 |
 
 **不包含换模型压缩、调整压缩推理强度或压缩加速插件。** 模型请求和压缩仍由官方后端执行。
@@ -48,11 +50,11 @@
 
 ### 下载与安装
 
-到 [0.6.9 发布页](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.9) 下载：
+到 [0.6.16 发布页](https://github.com/yimengbenxin/codex-context-menu/releases/tag/v0.6.16) 下载：
 
-- `CodexContextMenu-0.6.9-macOS-arm64.dmg`：磁盘映像。
-- `CodexContextMenu-0.6.9-macOS-arm64.zip`：压缩包，与 DMG 包含相同应用和安装程序。
-- `v0.6.9-SHA256.txt`：文件校验值。
+- `CodexContextMenu-0.6.16-macOS-arm64.dmg`：磁盘映像。
+- `CodexContextMenu-0.6.16-macOS-arm64.zip`：压缩包，与 DMG 包含相同应用和安装程序。
+- `v0.6.16-SHA256.txt`：文件校验值。
 
 1. 校验下载文件，解压 ZIP 或挂载 DMG。
 2. 将 `CodexContextMenu.app` 拖入 DMG 中的 Applications 入口，再从应用目录打开。挂载 DMG 本身并不等于安装。
@@ -85,7 +87,7 @@ python3 install_local.py ./CodexContextMenu.app --check
 
 保存成功只表示设置已写入，**不代表运行时已经加载**。下一轮以实际运行反馈为准。正在生成、存在其他订阅者或无法完整保留的权限状态时，可能无法立即重新加载。
 
-### 自适应如何升档
+### 自适应如何升降档
 
 三个档位来自官方模型元数据：**官方初始值 → 初始值与上限的算术中间值 → 官方上限**，不是固定的 272K / 487K / 872K。
 
@@ -98,7 +100,11 @@ python3 install_local.py ./CodexContextMenu.app --check
 - 初始与上限留空取官方值；中间档留空时，取当前初始与上限的算术中点，包含你自定义的端点。
 - 手动压缩或失败压缩：不升档。
 
+回退复用同一低阈值（默认 35%，保存的自定义阈值优先）。成功自动压缩后的保留量连续两次严格低于 **相邻低一档预算 × 低阈值**，回退一级；最高档比较中间档，中间档比较初始档，初始档不再回退。达到回退线、手动、失败或缺少压缩完成快照会中断回退计数。升降档后清空计数，重启保留未完成计数；同一轮最多回退一档，旧运行档的反馈不会让尚未加载的新档继续跳档。回退使用观察器在压缩完成时保存的总量快照，不使用本轮最后输入量或累计消费冒充。
+
 满足条件后，新档位在**下一轮对话**加载，不改变本轮正在生成的回复，也不必再等一次压缩。
+
+普通新一轮、空闲时恢复目标任务和启动队列均为加载入口。向活动目标追加消息及内核内部自动续跑不是可重载入口，不能保证立即换档；工具不自动暂停用户目标。
 
 从自定义切回自适应：**从配置的初始档重新开始**；初始档留空时使用官方初始值。不保留旧的自定义预算或历史升档。保存操作更新激活代次，状态修订随之变化；保持自适应时正常重启仍恢复同一代次的档位。
 
@@ -150,7 +156,15 @@ flowchart LR
 
 ## 验证结果与已知限制
 
-0.6.9 的单元检查包含 **116 项**：40项Swift、32项Node、44项Python，无跳过。另有官方签名0.159.2隔离原生金丝雀、发布包解包资源复测与安装前检查。0.159.0的生命周期兼容性沿用此前验收，本次新增观测链路在0.159.2验证，不宣称所有版本均已复测。
+0.6.16 汇总此前本机维护更新：自适应降档、任务安全启动边界加载、减少后台受保护文件读取、CodexBar 0.70.0 用量与原生展示、窗口抢焦点修复，以及所有折叠标题整行点击（包含嵌套明细）。[完整中文发布说明](docs/RELEASE_NOTES_0.6.16.md)。
+
+本机维护版 0.6.15 修复设置窗口抢焦点：拒绝未激活状态下的后台重开；异步对话定位只更新数据，不再次置顶或激活窗口。新增 `--background` 安装选项，不弹出安装后的设置窗口。182 项检查通过，并验证现有桌面入口仍能手动打开；已安装应用日志确认后台重开被忽略，主 Codex 和保存的对话配置未变。激活日志仅记录事件类型，不记录聊天、路径、账号或凭据。
+
+本机维护版 0.6.14 使用 CodexBar 0.70.0 官方 CLI 与 MIT 原生绘制组件。用量菜单及窗口预览沿用 310pt 卡片、6pt 进度条、额度重置倒计时、Credits 和费用层级；输入、输出、缓存、推理、历史及项目数据仍可展开查看。上下文是默认入口，不增加浏览器 Cookie 读取或多提供方伪按钮。178 项本地检查通过；不宣称整个 CodexBar 应用像素级一致或未定价模型已有准确费用。
+
+本地维护版修复后台文件授权：每日用量统计只允许读取 Codex 历史、统计缓存及必要系统文件，不再访问历史项目的代码或 Git 目录。打开设置也不再自动读取上次项目；请主动识别对话、定位链接或选择项目。首次主动访问 macOS 保护目录、迁移设备或应用签名变化时，系统仍可能要求一次授权；本工具不会要求关闭隐私保护或开启完整磁盘访问。
+
+0.6.16 的单元检查包含 **116 项**：40项Swift、32项Node、44项Python，无跳过。另有官方签名0.159.2隔离原生金丝雀、发布包解包资源复测与安装前检查。0.159.0的生命周期兼容性沿用此前验收，本次新增观测链路在0.159.2验证，不宣称所有版本均已复测。
 
 已验证：
 
@@ -185,8 +199,8 @@ python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
 node --test macos/Tests/compaction-observer.test.mjs
 python3 -B -m unittest discover -s macos/Tests -p 'test_compaction*.py'
-bash scripts/build_release.sh 0.6.9
-python3 -B scripts/verify_package.py 0.6.9
+bash scripts/build_release.sh 0.6.16
+python3 -B scripts/verify_package.py 0.6.16
 ```
 
 可选原生夹具：在隔离环境安装 `requirements-test.txt`，具备受支持的官方程序和模型元数据后，运行 `python3 -B macos/Tests/test_adaptive_boundary.py`。它使用本地回环上的合成响应，不代表真实模型的质量和速度。
@@ -206,6 +220,6 @@ launchctl bootout "gui/$(id -u)/local.wen.CodexContextMenu"
 
 ## 许可证与反馈
 
-采用 MIT，保留上游 [Codex Token Overlay](https://github.com/soleillevant0125/codex-token-overlay) 的许可与署名。依赖 CodexBar 0.69.0 和 tomlkit 0.13.3 同为 MIT，见 [第三方声明](docs/THIRD_PARTY_NOTICES.md)。不分发 OpenAI 软件。
+采用 MIT，保留上游 [Codex Token Overlay](https://github.com/soleillevant0125/codex-token-overlay) 的许可与署名。依赖 CodexBar 0.70.0 和 tomlkit 0.13.3 同为 MIT，见 [第三方声明](docs/THIRD_PARTY_NOTICES.md)。不分发 OpenAI 软件。
 
 反馈时请提供平台、应用版本及脱敏的问题描述，**不要上传凭据、SQLite 数据库或真实聊天日志**。

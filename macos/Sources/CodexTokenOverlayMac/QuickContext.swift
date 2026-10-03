@@ -81,7 +81,7 @@ private struct QuickContextView: View {
                         Text("K tokens").font(.caption).foregroundStyle(.secondary)
                     }
                 } else if model.mode == .adaptive {
-                    Text("从初始档开始；成功自动压缩后按保留比例升档。阈值与档位可在完整设置修改。")
+                    Text("从初始档开始，按压缩保留量逐级升降；连续两次低于相邻低档的低阈值时降一级。阈值与档位可在完整设置修改。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Text("保存后在下一轮加载，不打断当前回复。").font(.caption).foregroundStyle(.secondary)

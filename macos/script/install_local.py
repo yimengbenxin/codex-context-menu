@@ -86,6 +86,7 @@ if "--check" in sys.argv[2:]:
     raise SystemExit(0)
 integrate_only = "--integrate-only" in sys.argv[2:]
 preserve_window = "--preserve-window" in sys.argv[2:]
+background = "--background" in sys.argv[2:]
 if integrate_only:
     APPLICATION = candidate
 
@@ -154,7 +155,7 @@ try:
     logs = HOME / "Library/Logs"
     logs.mkdir(parents=True, exist_ok=True)
     PLIST.write_bytes(plistlib.dumps({"Label": "local.wen.CodexContextMenu", "RunAtLoad": True,
-        "ProgramArguments": [str(APPLICATION / "Contents/MacOS/CodexTokenOverlayMac"), "--background"],
+        "ProgramArguments": ["/usr/bin/open", "-g", "-a", str(APPLICATION), "--args", "--background"],
         "ProcessType": "Interactive", "LimitLoadToSessionType": "Aqua",
         "StandardOutPath": str(logs / "CodexContextMenu.log"), "StandardErrorPath": str(logs / "CodexContextMenu.log")}))
     if not integrate_only and not preserve_window:
@@ -164,7 +165,7 @@ try:
         "main_restart_required_once": True, "global_config_unchanged": True,
         "quota_reader_installed": True, "automatic_quota_default": False, "quota_source": "CodexBar OAuth; official OpenAI"}
     (SUPPORT / "installation.json").write_text(json.dumps(report, indent=2) + "\n")
-    if not integrate_only and not preserve_window:
+    if not integrate_only and not preserve_window and not background:
         command("/usr/bin/open", "-a", str(APPLICATION), "--args", "--show-settings")
     print(json.dumps(report))
 except Exception:

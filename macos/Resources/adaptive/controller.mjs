@@ -104,7 +104,8 @@ export class AdaptiveController {
       const session = this.sessions.get(params.threadId);
       if (session) session.manual = true;
     }
-    if (message.method !== 'turn/start') return message;
+    const startsGoal = message.method === 'thread/goal/set' && (!params.status || params.status === 'active');
+    if (!startsGoal && !['turn/start', 'thread/queue/start'].includes(message.method)) return message;
     await this.writes;
     let session = this.sessions.get(params.threadId);
     if (!session) {
@@ -113,13 +114,15 @@ export class AdaptiveController {
       this.sessions.set(params.threadId, session);
     }
     if (session.provider && session.provider !== 'openai') return message;
-    session.context = null;
     const context = await this.context(params.cwd ?? session.cwd, params.model ?? session.model, params.threadId);
     if (!context) return message;
-    session.context = context;
     const expected = context.expected;
     const status = await this.request('thread/read', {threadId: params.threadId, includeTurns: false});
-    if (status.thread.status?.type === 'active') return message;
+    if (status.thread.status?.type === 'active') {
+      if (session.applied !== context.signature)
+        this.log({event: 'budget_deferred_active_turn', threadId: params.threadId, requested: expected, observed: session.window});
+      return message;
+    }
     if (session.applied !== context.signature || (session.window !== undefined && session.window !== expected)) {
       const previous = session.window ?? expected;
       let preserved;
@@ -134,6 +137,7 @@ export class AdaptiveController {
         await this.request('thread/resume', {...preserved, threadId: params.threadId, config});
         session.configuration = config;
         session.applied = context.signature;
+        session.context = context;
         session.requestedWindow = expected;
         this.log({event: 'round_boundary_budget_requested', threadId: params.threadId, budget: context.budget, adaptive: context.adaptive});
       } catch (error) {
@@ -141,9 +145,10 @@ export class AdaptiveController {
           config: {...preserved.config, model_context_window: Math.ceil(previous * 100 / context.bounds.percent)}});
         this.log({event: 'expansion_failed_restored_previous', threadId: params.threadId, error: error.message});
       }
-    }
+    } else session.context = context;
     session.compacted = false;
     session.manual = false;
+    session.compactionSamples = [];
     return message;
   }
 
@@ -175,15 +180,17 @@ export class AdaptiveController {
       this.log({event: 'runtime_budget_mismatch', threadId: params.threadId, requested: session.requestedWindow, observed: session.window});
       delete session.requestedWindow;
     }
-    if (!session.compacted || !session.context?.adaptive) return;
+    if ((!session.compacted && !session.compactionSamples?.length) || !session.context?.adaptive) return;
     const context = session.context;
     const retained = session.retained;
     const successful = params.turn.status === 'completed';
     const manual = session.manual;
+    const samples = session.compactionSamples ?? [];
+    session.compactionSamples = [];
     session.compacted = false;
     this.writes = this.writes.then(async () => {
-      const next = await this.store.update(context.key, context.revision, context.bounds, retained, successful, manual);
-      this.log({event: 'compaction_feedback', budget: next.budget, successful, manual});
+      const next = await this.store.update(context.key, context.revision, context.bounds, retained, successful, manual, samples, context.budget);
+      this.log({event: 'compaction_feedback', threadId: params.threadId, budget: next.budget, successful, manual});
     }).catch(error => this.log({event: 'feedback_save_failed', error: error.message}));
   }
 }

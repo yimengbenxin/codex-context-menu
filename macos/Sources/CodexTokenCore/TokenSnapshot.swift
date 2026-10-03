@@ -11,6 +11,10 @@ public struct TokenSnapshot: Codable, Equatable, Sendable {
     public let contextUsedTokens: Int64
     public let contextWindowTokens: Int64
     public let targetContextBudgetTokens: Int64?
+    public let lastInputTokens: Int64?
+    public let lastCachedInputTokens: Int64?
+    public let lastOutputTokens: Int64?
+    public let lastReasoningOutputTokens: Int64?
     public let updatedAt: Date
 
     public init(
@@ -24,7 +28,11 @@ public struct TokenSnapshot: Codable, Equatable, Sendable {
         contextUsedTokens: Int64,
         contextWindowTokens: Int64,
         updatedAt: Date,
-        targetContextBudgetTokens: Int64? = nil
+        targetContextBudgetTokens: Int64? = nil,
+        lastInputTokens: Int64? = nil,
+        lastCachedInputTokens: Int64? = nil,
+        lastOutputTokens: Int64? = nil,
+        lastReasoningOutputTokens: Int64? = nil
     ) {
         self.threadID = threadID
         self.logPath = logPath
@@ -37,6 +45,10 @@ public struct TokenSnapshot: Codable, Equatable, Sendable {
         self.contextWindowTokens = contextWindowTokens
         self.updatedAt = updatedAt
         self.targetContextBudgetTokens = targetContextBudgetTokens
+        self.lastInputTokens = lastInputTokens
+        self.lastCachedInputTokens = lastCachedInputTokens
+        self.lastOutputTokens = lastOutputTokens
+        self.lastReasoningOutputTokens = lastReasoningOutputTokens
     }
 
     public var uncachedInputTokens: Int64 {

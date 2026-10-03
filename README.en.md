@@ -4,7 +4,7 @@ A native macOS companion for choosing a Codex conversation's context budget with
 
 [简体中文](README.md) · [Downloads](https://github.com/yimengbenxin/codex-context-menu/releases) · [Issues](https://github.com/yimengbenxin/codex-context-menu/issues)
 
-**Unofficial community software. Not developed, endorsed or supported by OpenAI.** Version 0.6.9 is an experimental, narrowly compatible release, not a universal Codex patch.
+**Unofficial community software. Not developed, endorsed or supported by OpenAI.** Version 0.6.16 is an experimental, narrowly compatible release, not a universal Codex patch.
 
 ## Why / problems solved
 
@@ -34,7 +34,7 @@ Discovery supports Codex.app / ChatGPT.app under system or user Applications, wi
 
 Use the existing Codex-managed Python runtime, or Python 3.11+ at `/opt/homebrew/bin/python3` or `/usr/local/bin/python3`. No Python libraries need installing for normal use; the TOML editor is vendored with its license.
 
-1. Download `CodexContextMenu-0.6.9-macOS-arm64.zip` or the equivalent DMG from Releases. Verify against `v0.6.9-SHA256.txt`.
+1. Download `CodexContextMenu-0.6.16-macOS-arm64.zip` or the equivalent DMG from Releases. Verify against `v0.6.16-SHA256.txt`.
 2. Drag the app to Applications and open it. Mounting a DMG is not installation.
 3. Click the in-app component setup/revalidation button. Copying .app alone previously missed runtime integration; restarting cannot install it. Alternatively, keep the supplied files together and double-click Install.command for a backed-up per-user installation. No administrator password is needed.
 4. Fully quit and reopen Codex **once for initial integration**. This is not a per-conversation restart. Installing an updated runtime component also requires loading that new component; ordinary budget changes do not.
@@ -105,11 +105,11 @@ python3 -B -m unittest discover -s macos/Tests -p test_adaptive_settings.py
 python3 -B -m unittest discover -s macos/Tests -p test_runtime_probe.py
 node --test macos/Tests/compaction-observer.test.mjs
 python3 -B -m unittest discover -s macos/Tests -p 'test_compaction*.py'
-bash scripts/build_release.sh 0.6.9
-python3 -B scripts/verify_package.py 0.6.9
+bash scripts/build_release.sh 0.6.16
+python3 -B scripts/verify_package.py 0.6.16
 ```
 
-The 0.6.9 suite includes 116 unit checks: 40 Swift, 32 Node and 44 Python, without skips. Native 0.159.2 canaries exercise two sets of 11 automatic compactions at a 272K budget and 95% target: 270.005K observations preserve 95%, while 280.005K observations recommend 92%. Packaged resources repeat this chain after extraction. Cold restart, history prefixes, database integrity and protected primary configuration/binary hashes are checked. Prior 0.159.0 lifecycle acceptance is retained, not claimed as a new observation-feature test on that version. Live companion read/refresh and draft preservation passed; a local primary restart confirmed the current runtime and statistics reader loaded, without claiming real long-history trigger acceptance. Synthetic tests are not real-model speed, quality or long-term stability evidence.
+The 0.6.16 suite includes 116 unit checks: 40 Swift, 32 Node and 44 Python, without skips. Native 0.159.2 canaries exercise two sets of 11 automatic compactions at a 272K budget and 95% target: 270.005K observations preserve 95%, while 280.005K observations recommend 92%. Packaged resources repeat this chain after extraction. Cold restart, history prefixes, database integrity and protected primary configuration/binary hashes are checked. Prior 0.159.0 lifecycle acceptance is retained, not claimed as a new observation-feature test on that version. Live companion read/refresh and draft preservation passed; a local primary restart confirmed the current runtime and statistics reader loaded, without claiming real long-history trigger acceptance. Synthetic tests are not real-model speed, quality or long-term stability evidence.
 
 To run the optional native fixture, install `requirements-test.txt` into an isolated environment and run `python3 -B macos/Tests/test_adaptive_boundary.py` with the supported official app and model metadata available. It uses synthetic responses on loopback; it is not a real-model speed or quality test.
 

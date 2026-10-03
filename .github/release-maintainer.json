@@ -7,24 +7,61 @@
   "title_template": "Codex 上下文 {version} · macOS 试用版",
   "release_notes_file": "docs/RELEASE_NOTES_{version}.md",
   "verify_commands": [
-    {"argv": ["bash", "scripts/test_swift.sh"], "timeout": 300},
-    {"argv": ["node", "--test", "macos/Tests/adaptive.test.mjs", "macos/Tests/privacy-boundary.test.mjs", "macos/Tests/compaction-observer.test.mjs"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_context_config.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_thread_settings.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_installer.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_adaptive_settings.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_runtime_probe.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_adaptive_preview.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "macos/Tests", "-p", "test_compaction*.py"], "timeout": 180},
-    {"argv": ["python3", "-B", "macos/Tests/test_adaptive_boundary.py"], "timeout": 180}
+    {
+      "argv": [
+        "bash",
+        "scripts/test_swift.sh"
+      ],
+      "timeout": 300
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "node --test macos/Tests/*.test.mjs"
+      ],
+      "timeout": 180
+    },
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "macos/Tests",
+        "-p",
+        "test_*.py"
+      ],
+      "timeout": 300
+    }
   ],
   "build_commands": [
-    {"argv": ["bash", "scripts/build_release.sh", "{version}"], "timeout": 300}
+    {
+      "argv": [
+        "bash",
+        "scripts/build_release.sh",
+        "{version}"
+      ],
+      "timeout": 300
+    }
   ],
   "post_build_verify_commands": [
-    {"argv": ["python3", "-B", "scripts/verify_package.py", "{version}"], "timeout": 300}
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/verify_package.py",
+        "{version}"
+      ],
+      "timeout": 300
+    }
   ],
-  "artifacts": ["dist/CodexContextMenu-{version}-macOS-arm64.zip", "dist/CodexContextMenu-{version}-macOS-arm64.dmg"],
+  "artifacts": [
+    "dist/CodexContextMenu-{version}-macOS-arm64.zip",
+    "dist/CodexContextMenu-{version}-macOS-arm64.dmg"
+  ],
   "prerelease": true,
   "mark_latest": false
 }

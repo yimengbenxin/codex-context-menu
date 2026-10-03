@@ -6,6 +6,7 @@ import path from 'node:path';
 import {BudgetStore, feedback, modelBounds, compactionPolicy} from '../Resources/adaptive/policy.mjs';
 import {AdaptiveController} from '../Resources/adaptive/controller.mjs';
 import {resumeSettings} from '../Resources/adaptive/resume-settings.mjs';
+import {CompactionObserver} from '../Resources/adaptive/compaction-observer.mjs';
 
 const catalog = {models: [{slug: 'fixture', context_window: 160000,
   max_context_window: 240000, effective_context_window_percent: 95}]};
@@ -57,6 +58,60 @@ function compacted(controller, threadId, status = 'completed') {
 
 const turn = {id: 7, method: 'turn/start', params: {threadId: 'first',
   input: [{type: 'text', text: 'Original user message'}], effort: 'high'}};
+
+test('completion snapshots cause downshift only at the following idle boundary', async context => {
+  const {controller, calls} = fixture(context);
+  const key = '/project\u0000fixture';
+  await controller.store.update(key, 'first', bounds, 110000, true, false);
+  const observer = new CompactionObserver(controller, async () => {});
+  const emit = (method, payload) => {
+    const message = {method, params: {threadId: 'first', turnId: 'fixture-turn', ...payload}};
+    observer.observe(message);
+    controller.observe(message);
+  };
+  for (const identifier of ['first-low', 'second-low']) {
+    await controller.before(turn);
+    emit('thread/tokenUsage/updated', {tokenUsage: {modelContextWindow: 190000, last: {inputTokens: 210000, totalTokens: 210005}}});
+    const item = {type: 'contextCompaction', id: identifier};
+    emit('item/started', {item});
+    emit('thread/tokenUsage/updated', {tokenUsage: {modelContextWindow: 190000, last: {inputTokens: 49995, totalTokens: 50000}}});
+    emit('item/completed', {item});
+    emit('thread/tokenUsage/updated', {tokenUsage: {modelContextWindow: 190000, last: {inputTokens: 70000, totalTokens: 70005}}});
+    emit('turn/completed', {turn: {status: 'completed'}});
+    await controller.writes;
+    assert.equal(controller.sessions.get('first').window, 190000);
+  }
+  assert.equal(controller.store.get(key, 'first', bounds).budget, 160000);
+  await controller.before(turn);
+  assert.equal(calls.filter(call => call.method === 'thread/resume').at(-1).params.config.model_context_window, 160000);
+  assert.equal(controller.sessions.get('first').requestedWindow, 152000);
+});
+
+test('failed downshift reload restores the old runtime and retries without cascading feedback', async context => {
+  let rejectLower = false;
+  const {controller, calls, events} = fixture(context, {request: async (method, params) => {
+    if (rejectLower && method === 'thread/resume' && params.config?.model_context_window === 160000)
+      throw new Error('Synthetic downshift resume failure');
+  }});
+  const key = '/project\u0000fixture';
+  await controller.store.update(key, 'first', bounds, 110000, true, false);
+  await controller.before(turn);
+  usage(controller, 'first', 190000, 70000);
+  await controller.store.update(key, 'first', bounds, 70000, true, false,
+    [{retained: 50000, successful: true, manual: false}, {retained: 50000, successful: true, manual: false}], 200000);
+  rejectLower = true;
+  assert.strictEqual(await controller.before(turn), turn);
+  assert.equal(calls.filter(call => call.method === 'thread/resume').at(-1).params.config.model_context_window, 200000);
+  assert.equal(controller.sessions.get('first').context.budget, 200000);
+  assert.ok(events.some(event => event.event === 'expansion_failed_restored_previous'));
+  compacted(controller, 'first');
+  await controller.writes;
+  assert.equal(controller.store.get(key, 'first', bounds).budget, 160000);
+  rejectLower = false;
+  await controller.before(turn);
+  assert.equal(controller.sessions.get('first').context.budget, 160000);
+  assert.equal(controller.sessions.get('first').requestedWindow, 152000);
+});
 
 test('thread overrides isolate feedback and reset to project context', async context => {
   let override = true;
@@ -209,6 +264,62 @@ test('active thread never unloads despite project expansion', async context => {
   sessions.get('first').status = {type: 'active'};
   await controller.before(turn);
   assert.ok(!calls.some(call => call.method === 'thread/unsubscribe'));
+});
+
+for (const method of ['thread/goal/set', 'thread/queue/start']) {
+  test(`${method} loads a saved thread adaptive override before native task startup`, async context => {
+    const {controller, calls} = fixture(context, {
+      configuration: {model_context_window: 210000},
+      settings: async () => ({root: '/project', trusted: true, override: true,
+        adaptive: true, effective_adaptive: false, revision: 'new-adaptive'}),
+      request: async method => method === 'config/read' ? {config: {model_context_window: 210000}} : undefined});
+    usage(controller, 'first', 199500);
+    const start = {id: 9, method, params: {threadId: 'first', status: 'active'}};
+    assert.strictEqual(await controller.before(start), start);
+    assert.equal(calls.filter(call => call.method === 'thread/resume').at(-1).params.config.model_context_window, 160000);
+    assert.equal(controller.sessions.get('first').context.budget, 160000);
+    usage(controller, 'first', 152000);
+    compacted(controller, 'first');
+    await controller.writes;
+    assert.equal((await controller.context('/project', 'fixture', 'first')).budget, 200000);
+  });
+}
+
+test('non-active goal updates do not reload the thread', async context => {
+  const {controller, calls} = fixture(context);
+  for (const status of ['paused', 'blocked', 'complete', 'budgetLimited', 'usageLimited'])
+    await controller.before({method: 'thread/goal/set', params: {threadId: 'first', status}});
+  assert.equal(calls.length, 0);
+});
+
+test('active goal preserves its applied feedback context while another budget is pending', async context => {
+  let revision = 'first';
+  const {controller, calls, events, sessions} = fixture(context, {settings: async () => ({
+    root: '/project', trusted: true, adaptive: true, override: true, revision})});
+  await controller.before(turn);
+  const applied = controller.sessions.get('first').context;
+  revision = 'reset-after-save';
+  sessions.get('first').status = {type: 'active'};
+  calls.length = 0;
+  await controller.before({method: 'thread/goal/set', params: {threadId: 'first', status: 'active'}});
+  assert.strictEqual(controller.sessions.get('first').context, applied);
+  assert.ok(!calls.some(call => call.method === 'thread/unsubscribe'));
+  assert.equal(controller.store.get(applied.key, revision, bounds).budget, 160000);
+});
+
+test('goal startup restores the previous budget when reload fails', async context => {
+  const {controller, calls, events} = fixture(context, {
+    configuration: {model_context_window: 210000},
+    request: async (method, params) => {
+      if (method === 'thread/resume' && params.config?.model_context_window === 160000)
+        throw new Error('Synthetic goal reload failure');
+    }});
+  usage(controller, 'first', 199500);
+  const start = {method: 'thread/goal/set', params: {threadId: 'first', status: 'active'}};
+  assert.strictEqual(await controller.before(start), start);
+  assert.equal(calls.filter(call => call.method === 'thread/resume').at(-1).params.config.model_context_window, 210000);
+  assert.ok(events.some(event => event.event === 'expansion_failed_restored_previous'));
+  assert.equal(controller.sessions.get('first').context, undefined);
 });
 
 test('idle reload delegates cache teardown to native resume without a client unload deadline', async context => {

@@ -46,13 +46,42 @@ export function compactionPolicy(bounds, budget, percent, compact = null, scope 
     maximum_percent: maximumPercent, budget: requested, effective_percent: effective};
 }
 
-export function feedback(bounds, state, retained, successful, manual) {
+export function feedback(bounds, state, retained, successful, manual, samples = []) {
   const next = {...state};
-  if (!successful || manual || !Number.isSafeInteger(retained) || retained < 0) return next;
+  if (!successful || manual || !Number.isSafeInteger(retained) || retained < 0) {
+    delete next.lowRetention;
+    return next;
+  }
+  const seen = new Set([next.lastCompactionId]);
+  const observations = samples.filter(sample => {
+    if (typeof sample.id !== 'string') return true;
+    if (seen.has(sample.id)) return false;
+    seen.add(sample.id);
+    return true;
+  });
+  if (samples.length && !observations.length) return next;
+  if (observations.at(-1)?.id) next.lastCompactionId = observations.at(-1).id;
+  const previous = bounds.tiers[bounds.tiers.indexOf(next.budget) - 1];
+  if (!previous || !observations.length) delete next.lowRetention;
+  else for (const sample of observations) {
+    if (!sample.successful || sample.manual || !Number.isSafeInteger(sample.retained) || sample.retained < 0
+        || sample.retained >= previous * bounds.thresholds.lower) delete next.lowRetention;
+    else next.lowRetention = (next.lowRetention ?? 0) + 1;
+    if (next.lowRetention >= 2) {
+      next.budget = previous;
+      next.ambiguous = 0;
+      delete next.lowRetention;
+      return next;
+    }
+  }
   const ratio = retained / next.budget;
   if (ratio < bounds.thresholds.lower) next.ambiguous = 0;
   else if (ratio >= bounds.thresholds.upper || (next.ambiguous = (next.ambiguous ?? 0) + 1) >= 2) {
-    next.budget = bounds.tiers.find(tier => tier > next.budget) ?? next.budget;
+    const expanded = bounds.tiers.find(tier => tier > next.budget);
+    if (expanded !== undefined) {
+      next.budget = expanded;
+      delete next.lowRetention;
+    }
     next.ambiguous = 0;
   }
   return next;
@@ -78,7 +107,7 @@ export class BudgetStore {
     return saved;
   }
 
-  async update(key, revision, bounds, retained, successful, manual) {
+  async update(key, revision, bounds, retained, successful, manual, samples = [], appliedBudget) {
     fs.mkdirSync(this.directory, {recursive: true, mode: 0o700});
     if (fs.lstatSync(this.directory).isSymbolicLink()) throw new Error('Budget directory cannot be a symlink');
     let descriptor;
@@ -89,16 +118,18 @@ export class BudgetStore {
         break;
       } catch (error) {
         if (error.code !== 'EEXIST') throw error;
-        const stat = fs.lstatSync(this.lock);
-        if (stat.isSymbolicLink()) throw new Error('Budget lock cannot be a symlink');
-        const owner = Number(fs.readFileSync(this.lock, 'utf8'));
-        if (Number.isSafeInteger(owner) && owner > 0) {
-          try { process.kill(owner, 0); }
-          catch (check) {
-            if (check.code === 'ESRCH' && fs.existsSync(this.lock) && fs.lstatSync(this.lock).ino === stat.ino)
-              fs.unlinkSync(this.lock);
+        try {
+          const stat = fs.lstatSync(this.lock);
+          if (stat.isSymbolicLink()) throw new Error('Budget lock cannot be a symlink');
+          const owner = Number(fs.readFileSync(this.lock, 'utf8'));
+          if (Number.isSafeInteger(owner) && owner > 0) {
+            try { process.kill(owner, 0); }
+            catch (check) {
+              if (check.code === 'ESRCH' && fs.existsSync(this.lock) && fs.lstatSync(this.lock).ino === stat.ino)
+                fs.unlinkSync(this.lock);
+            }
           }
-        }
+        } catch (check) { if (check.code !== 'ENOENT') throw check; }
       }
       await new Promise(resolve => setTimeout(resolve, 50));
     }
@@ -107,7 +138,8 @@ export class BudgetStore {
     try {
       const document = this.read();
       const current = this.get(key, revision, bounds);
-      const next = feedback(bounds, current, retained, successful, manual);
+      if (appliedBudget !== undefined && current.budget !== appliedBudget) return current;
+      const next = feedback(bounds, current, retained, successful, manual, samples);
       document[key] = next;
       fs.writeFileSync(temporary, JSON.stringify(document), {mode: 0o600});
       fs.renameSync(temporary, this.file);

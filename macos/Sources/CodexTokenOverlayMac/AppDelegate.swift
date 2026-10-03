@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import SwiftUI
+import OSLog
 import CodexTokenCore
 
 @MainActor
@@ -41,10 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let contextSettings = ContextSettingsController()
     private var contextMenuItem: NSMenuItem!
     private var statusMenu: NSMenu!
+    private var usageMenus: [NSMenu] = []
     private var pendingStatusClick: DispatchWorkItem?
     private var compactMenuItem: NSMenuItem!
     private var iconOnly = UserDefaults.standard.object(forKey: "menu.iconOnly") as? Bool ?? true
     private let quickContext = QuickContextController()
+    private let windowLogger = Logger(subsystem: "local.wen.CodexContextMenu", category: "window")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.mainMenu = NativeEditingMenu.make()
@@ -52,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if FileManager.default.isExecutableFile(atPath: backend.path) {
             let process = Process()
             process.executableURL = backend
+            process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
             process.arguments = ["--restore-integration"]
             try? process.run()
         }
@@ -78,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quickContext.openSettings = { [weak self] in self?.contextSettings.chooseProject() }
         contextSettings.usage.startMonitoring()
         contextSettings.model.inspectRuntime()
-        if !CommandLine.arguments.contains("--background") || !FileManager.default.isExecutableFile(atPath: backend.path) {
+        if !CommandLine.arguments.contains("--background") {
             contextSettings.chooseProject()
         }
     }
@@ -90,11 +95,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard sender.isActive else {
+            windowLogger.info("Ignored inactive application reopen")
+            return false
+        }
+        windowLogger.info("Accepted foreground application reopen")
         contextSettings.chooseProject()
         return false
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        if usageMenus.contains(where: { $0 === menu }) {
+            populateUsageMenu(menu)
+            return
+        }
         refreshFieldMenuStates()
         refreshLoginItemState()
         updateMenu(snapshot: lastSnapshot, routeStatus: lastRouteStatus)
@@ -139,6 +153,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let applicationQuick = NSMenuItem(title: "上下文", action: nil, keyEquivalent: "")
         applicationQuick.submenu = makeQuickMenu()
         NSApp.mainMenu?.addItem(applicationQuick)
+
+        let usageItem = NSMenuItem(title: "用量 / Token 统计", action: nil, keyEquivalent: "")
+        usageItem.submenu = makeUsageMenu()
+        menu.addItem(usageItem)
+        let applicationUsage = NSMenuItem(title: "用量", action: nil, keyEquivalent: "")
+        applicationUsage.submenu = makeUsageMenu()
+        NSApp.mainMenu?.addItem(applicationUsage)
 
         contextMenuItem = NSMenuItem(title: "识别当前对话并更改上下文…", action: #selector(changeProjectContext(_:)), keyEquivalent: "")
         contextMenuItem.target = self
@@ -254,6 +275,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         apply(snapshot: lastSnapshot, routeStatus: lastRouteStatus)
     }
 
+    private func makeUsageMenu() -> NSMenu {
+        let menu = NSMenu(title: "用量")
+        menu.delegate = self
+        usageMenus.append(menu)
+        populateUsageMenu(menu)
+        return menu
+    }
+
+    private func populateUsageMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let usage = contextSettings.usage
+        let host = NSHostingView(rootView: CodexBarUsageCard(presentation: CodexBarCardPresentation(usage)).fixedSize(horizontal: false, vertical: true))
+        host.frame = NSRect(x: 0, y: 0, width: CodexBarLayout.menuWidth, height: host.fittingSize.height)
+        let card = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        card.view = host
+        menu.addItem(card)
+        menu.addItem(.separator())
+        let actions: [(String, Selector)] = [("查看完整用量…", #selector(showUsage(_:))),
+            ("刷新本机 Token 统计", #selector(refreshUsage(_:))), ("读取 / 刷新官方额度", #selector(refreshQuota(_:)))]
+        for (title, action) in actions {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.isEnabled = action == #selector(refreshQuota(_:)) ? !usage.quotaBusy : (action == #selector(refreshUsage(_:)) ? !usage.costBusy : true)
+            menu.addItem(item)
+        }
+    }
+
+    @objc private func showUsage(_ sender: NSMenuItem) { contextSettings.showUsage() }
+    @objc private func refreshUsage(_ sender: NSMenuItem) { contextSettings.usage.refreshCost(refresh: true) }
+    @objc private func refreshQuota(_ sender: NSMenuItem) { contextSettings.usage.refreshQuota() }
+
     @objc private func quickContextMode(_ sender: NSMenuItem) {
         guard ContextMode.allCases.indices.contains(sender.tag), let button = statusItem.button else { return }
         quickContext.present(relativeTo: button, mode: ContextMode.allCases[sender.tag])
@@ -296,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func apply(snapshot: TokenSnapshot?, routeStatus: ActiveThreadRouteStatus) {
         lastSnapshot = snapshot
+        if contextSettings.usage.currentSession != snapshot { contextSettings.usage.currentSession = snapshot }
         if let snapshot, contextSettings.model.threadID == snapshot.threadID {
             contextSettings.model.observedWindow = snapshot.contextWindowTokens
             contextSettings.model.observedTarget = snapshot.targetContextBudgetTokens
@@ -414,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 let (target, title) = try await FocusedContextTarget.resolve(requestPermission: true)
                 let snapshot = lastSnapshot?.threadID == target.threadID ? lastSnapshot : nil
-                contextSettings.present(project: target.project, threadID: target.threadID,
+                contextSettings.loadTarget(project: target.project, threadID: target.threadID,
                     observedWindow: snapshot?.contextWindowTokens, observedTarget: snapshot?.targetContextBudgetTokens,
                     origin: .focused, title: title)
             } catch {

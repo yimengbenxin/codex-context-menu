@@ -17,6 +17,7 @@ MODEL = "gpt-6.1-sol"
 captured = []
 force_large_turns = 0
 force_large_tokens = 260000
+ordinary_tokens = 190000
 
 
 def events(body):
@@ -32,7 +33,7 @@ def events(body):
         "id": "fixture-message", "type": "message", "role": "assistant", "status": "completed",
         "content": [{"type": "output_text", "text": "OK", "annotations": []}]}
     ordinary_count = sum(request["kind"] == "turn" and not request["compact"] for request in captured)
-    tokens = 260000 if ordinary_count == 1 and kind == "turn" and not compact else 190000
+    tokens = 260000 if ordinary_count == 1 and kind == "turn" and not compact else ordinary_tokens
     if force_large_turns and kind == "turn" and not compact:
         tokens = force_large_tokens
         force_large_turns -= 1
@@ -103,7 +104,7 @@ class Rpc:
 
 
 async def run():
-    global force_large_turns, force_large_tokens
+    global force_large_turns, force_large_tokens, ordinary_tokens
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     protected = [Path.home() / ".codex/config.toml", Path(os.environ.get("CODEX_CONTEXT_TEST_BINARY", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"))]
     before = {str(file): hashlib.sha256(file.read_bytes()).hexdigest() for file in protected}
@@ -319,6 +320,111 @@ trust_level = "trusted"
                 result["configurable_policy"] = {"thresholds": [30, 50], "tiers": [320000, 550000, 800000],
                     "observed_windows": configured_windows, "custom_return_initial": reset_window, "reset_survives_restart": True,
                     "database_integrity": True}
+                down_project = directory / "adaptive-downshift"
+                (down_project / ".codex").mkdir(parents=True)
+                down_config = down_project / ".codex/config.toml"
+                down_config.write_text('[features]\nadaptive_context_budget = true\n')
+                global_config.write_text(global_config.read_text() + f'\n[projects.{json.dumps(str(down_project))}]\ntrust_level = "trusted"\n')
+                down_created = await rpc.request("thread/start", {"model": MODEL, "cwd": str(down_project),
+                    "approvalPolicy": "never", "sandbox": "read-only"})
+                down_thread = down_created["thread"]["id"]
+                down_private = private_directory / f"{down_thread}.json"
+                down_private.write_text(json.dumps({"root": str(down_project), "thread": down_thread,
+                    "mode": "adaptive", "window": None, "adaptive_options": {"tiers": [272000, 485000, 872000]}}))
+                force_large_tokens = 260000
+                force_large_turns = 1
+                down_windows = [await rpc.turn(down_thread) for _ in range(3)]
+                assert down_windows == [258400, 258400, 460750], down_windows
+                force_large_tokens = 500000
+                force_large_turns = 1
+                down_windows += [await rpc.turn(down_thread), await rpc.turn(down_thread)]
+                await stop()
+                down_key = str(down_project) + "\0" + MODEL + "\0" + down_thread
+                first_low = json.loads(state.read_text())[down_key]
+                assert first_low["budget"] == 485000 and first_low["lowRetention"] == 1, first_low
+                down_prefix = Path(down_created["thread"]["path"]).read_bytes()
+                down_config_before = down_config.read_bytes()
+                rpc = await start()
+                await rpc.request("thread/resume", {"threadId": down_thread})
+                force_large_tokens = 500000
+                force_large_turns = 1
+                down_windows += [await rpc.turn(down_thread), await rpc.turn(down_thread), await rpc.turn(down_thread)]
+                assert down_windows == [258400, 258400, 460750, 460750, 460750, 460750, 460750, 258400], down_windows
+                down_state = json.loads(state.read_text())[down_key]
+                assert down_state["budget"] == 272000 and "lowRetention" not in down_state, down_state
+                assert Path(down_created["thread"]["path"]).read_bytes().startswith(down_prefix)
+                assert down_config.read_bytes() == down_config_before
+                result["adaptive_downshift"] = {"windows": down_windows, "first_low_survives_restart": True,
+                    "next_turn_lower_budget": True, "history_preserved": True, "project_config_unchanged": True}
+                force_large_tokens = 260000
+                force_large_turns = 1
+                assert [await rpc.turn(down_thread) for _ in range(3)] == [258400, 258400, 460750]
+                ordinary_tokens = 300000
+                force_large_tokens = 500000
+                force_large_turns = 1
+                assert [await rpc.turn(down_thread) for _ in range(2)] == [460750, 460750]
+                ordinary_tokens = 190000
+                assert await rpc.turn(down_thread) == 828400
+                force_large_tokens = 900000
+                force_large_turns = 1
+                assert [await rpc.turn(down_thread) for _ in range(2)] == [828400, 828400]
+                await stop()
+                maximum_low = json.loads(state.read_text())[down_key]
+                assert maximum_low["budget"] == 872000 and maximum_low["lowRetention"] == 1, maximum_low
+                rpc = await start()
+                await rpc.request("thread/resume", {"threadId": down_thread})
+                force_large_tokens = 900000
+                force_large_turns = 1
+                maximum_windows = [await rpc.turn(down_thread) for _ in range(3)]
+                assert maximum_windows == [828400, 828400, 460750], maximum_windows
+                assert json.loads(state.read_text())[down_key]["budget"] == 485000
+                assert Path(down_created["thread"]["path"]).read_bytes().startswith(down_prefix)
+                assert down_config.read_bytes() == down_config_before
+                result["adaptive_downshift"]["maximum_to_middle_windows"] = maximum_windows
+                result["adaptive_downshift"]["both_downshift_boundaries_tested"] = True
+                goal_project = directory / "fixed-budget-goal"
+                (goal_project / ".codex").mkdir(parents=True)
+                goal_config = goal_project / ".codex/config.toml"
+                goal_config.write_text("model_context_window = 485000\nmodel_auto_compact_token_limit = 436500\n")
+                goal_config_before = goal_config.read_bytes()
+                global_config.write_text(global_config.read_text() + f'\n[projects.{json.dumps(str(goal_project))}]\ntrust_level = "trusted"\n')
+                goal_created = await rpc.request("thread/start", {"model": MODEL, "cwd": str(goal_project),
+                    "approvalPolicy": "never", "sandbox": "read-only"})
+                goal_thread = goal_created["thread"]["id"]
+                assert await rpc.turn(goal_thread) == 485000 * percent // 100
+                goal_history = Path(goal_created["thread"]["path"])
+                goal_prefix = goal_history.read_bytes()
+                goal_objective = "Return OK. Isolated goal startup budget fixture."
+                await rpc.request("thread/goal/set", {"threadId": goal_thread, "status": "paused",
+                    "objective": goal_objective, "tokenBudget": 20000})
+                (private_directory / f"{goal_thread}.json").write_text(json.dumps({
+                    "root": str(goal_project), "thread": goal_thread, "mode": "adaptive", "window": None,
+                    "adaptive_options": {"lower_percent": 40, "tiers": [None, 485000, None], "compaction_percent": 95},
+                    "adaptive_activation": "goal-start-reset"}))
+                await rpc.request("thread/goal/set", {"threadId": goal_thread, "status": "active"})
+                goal_window = None
+                started = False
+                while True:
+                    message = rpc.events.pop(0) if rpc.events else await rpc.receive()
+                    parameters = message.get("params", {})
+                    if parameters.get("threadId") != goal_thread:
+                        continue
+                    if message.get("method") == "turn/started":
+                        started = True
+                    if started and message.get("method") == "thread/tokenUsage/updated":
+                        goal_window = parameters["tokenUsage"]["modelContextWindow"]
+                    if started and message.get("method") == "turn/completed":
+                        assert parameters["turn"]["status"] == "completed", message
+                        break
+                assert goal_window == default * 95 // 100, goal_window
+                goal = await rpc.request("thread/goal/get", {"threadId": goal_thread})
+                assert goal["goal"]["status"] == "budgetLimited", goal
+                assert goal["goal"]["objective"] == goal_objective and goal["goal"]["tokenBudget"] == 20000
+                assert goal_config.read_bytes() == goal_config_before
+                assert goal_history.read_bytes().startswith(goal_prefix)
+                result["goal_start_reset"] = {"before": 485000 * percent // 100, "observed": goal_window,
+                    "project_config_unchanged": True, "history_preserved": True, "goal_preserved": True,
+                    "goal_status": goal["goal"]["status"]}
                 observation_cases = []
                 for input_tokens, expected_crossed, recommended in [(270000, 0, 95), (280000, 11, 92)]:
                     observed_project = directory / f"observation-{input_tokens}"

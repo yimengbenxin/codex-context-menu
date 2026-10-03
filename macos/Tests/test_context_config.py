@@ -35,6 +35,30 @@ class ContextConfigTests(unittest.TestCase):
         self.config.parent.mkdir(exist_ok=True)
         self.config.write_text(text)
 
+    def test_trust_lookup_does_not_probe_unrelated_project_paths(self):
+        unrelated = self.home / "Documents" / "unrelated-project"
+        with self.global_path.open("a") as output:
+            output.write('[projects.' + json.dumps(str(unrelated)) + ']\ntrust_level = "trusted"\n')
+        resolve = Path.resolve
+
+        def resolve_selected(path, *arguments, **options):
+            if path == unrelated:
+                raise AssertionError("Unrelated protected project was accessed")
+            return resolve(path, *arguments, **options)
+
+        with patch.object(Path, "resolve", resolve_selected):
+            self.assertTrue(backend.status(self.root)["trusted"])
+            child = self.root / "child"
+            child.mkdir()
+            self.assertTrue(backend.status(child)["trusted"])
+
+    def test_selected_project_alias_keeps_trust_without_probing_other_roots(self):
+        alias = self.home / "selected-alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        self.global_path.write_text('[projects.' + json.dumps(str(alias)) + ']\ntrust_level = "trusted"\n')
+        self.assertTrue(backend.status(alias)["trusted"])
+        self.assertEqual(backend.status(alias)["root"], str(self.root.resolve()))
+
     def test_custom_and_default_preserve_other_settings(self):
         self.store('# keep this comment\nmodel = "dynamic-model"\nmodel_auto_compact_token_limit = 100\n[mcp_servers.local]\ncommand = "echo"\n')
         current = backend.status(self.root)

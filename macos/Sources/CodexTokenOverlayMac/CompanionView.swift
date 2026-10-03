@@ -14,39 +14,24 @@ struct CompanionView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 26) {
-                Label("Codex 上下文", systemImage: "square.stack.3d.up")
-                    .font(.system(size: 15, weight: .semibold))
-                    .padding(.top, 14)
-                VStack(spacing: 5) {
-                    ForEach(CompanionPage.allCases) { page in
-                        Button { model.page = page } label: {
-                            Label(page.rawValue, systemImage: page.symbol)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12).padding(.vertical, 10)
-                                .background(model.page == page ? Color.accentColor.opacity(0.14) : .clear,
-                                            in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 0) {
+                List(selection: Binding<CompanionPage?>(get: { model.page }, set: { if let page = $0 { model.page = page } })) {
+                    Section("Codex 上下文") {
+                        ForEach(CompanionPage.allCases) { page in
+                            Label(page.rawValue, systemImage: page.symbol).tag(page)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(model.page == page ? Color.accentColor : Color.primary)
-                        .accessibilityAddTraits(model.page == page ? .isSelected : [])
                     }
-                }
-                Spacer()
+                }.listStyle(.sidebar)
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("外观", selection: $appearance) {
                         Text("跟随系统").tag("system")
                         Text("浅色").tag("light")
                         Text("深色").tag("dark")
-                    }
-                    .pickerStyle(.menu).controlSize(.small)
-                    .padding(.bottom, 8)
-                    Text("本地伴随工具").font(.caption).foregroundStyle(.secondary)
-                    Text("版本 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版")")
+                    }.pickerStyle(.menu).controlSize(.small)
+                    Text("版本 \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · CodexBar 0.70.0")
                         .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(20).frame(width: 178).background(.regularMaterial)
+                }.padding(16)
+            }.frame(width: 260).background(Color(nsColor: .underPageBackgroundColor))
             Divider()
             Group {
                 if model.page == .context {
@@ -56,6 +41,7 @@ struct CompanionView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .disclosureGroupStyle(FullWidthDisclosureStyle())
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(appearance == "light" ? .light : (appearance == "dark" ? .dark : nil))
@@ -75,7 +61,7 @@ struct ContextSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("上下文设置").font(.system(size: 26, weight: .semibold))
+                        Text("上下文设置").font(.title2).fontWeight(.semibold)
                         Text("选择策略，让上下文跟上你的任务。").foregroundStyle(.secondary)
                     }
                     if let reason = model.runtimeReason {
@@ -315,12 +301,12 @@ struct ContextSettingsView: View {
     }
 
     private var detailTitle: String {
-        switch model.mode { case .default: return "由 Codex 决定"; case .adaptive: return "随任务逐级扩展"; case .custom: return "指定你需要的预算" }
+        switch model.mode { case .default: return "由 Codex 决定"; case .adaptive: return "随任务逐级调整"; case .custom: return "指定你需要的预算" }
     }
     private var detailDescription: String {
         switch model.mode {
         case .default: return model.scope == .thread ? "清除本对话的覆盖，继承项目、上级与官方默认。不固定任何上下文数值。" : "移除项目覆盖，跟随官方模型与已有上级设置。不固定任何上下文数值。"
-        case .adaptive: return "自动压缩成功后，依据保留比例决定是否升档；新档位在下一轮加载。手动压缩或失败不升档。"
+        case .adaptive: return "保留比例达到条件时升档；连续两次成功自动压缩后的保留量低于相邻低档预算 × 两次触发线时，降一级。手动、失败或未知样本打断降档计数；新档位在下一安全启动边界加载。"
         case .custom: return "输入整数 K。留空恢复默认，不修改官方压缩模型或推理强度。"
         }
     }
@@ -371,147 +357,5 @@ struct InlineMessage: View {
     var body: some View {
         Label { Text(text).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: symbol).foregroundStyle(color) }
             .font(.caption).foregroundStyle(.primary).accessibilityElement(children: .combine)
-    }
-}
-
-struct UsageOverviewView: View {
-    @ObservedObject var model: UsageModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("用量概览").font(.system(size: 26, weight: .semibold))
-                        Text("官方额度与本机 Token 记录，分开看清楚。").foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button { model.refreshCost() } label: { Image(systemName: "arrow.clockwise") }
-                        .help("刷新本地统计").accessibilityLabel("刷新本地统计").disabled(model.costBusy)
-                }
-                localUsage
-                Divider()
-                quota
-                Divider()
-                DisclosureGroup("数据来源与隐私") {
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("复用 MIT 开源 CodexBar 0.69.0。本地统计只读 Codex 会话日志，并在禁止网络的子进程中运行。")
-                        Text("额度查询使用现有 Codex 登录凭据访问官方 OpenAI 用量接口，不读取浏览器 Cookie，不向社区作者上传聊天或凭据。")
-                        Text("本机 Token 记录不等于账号扣费、订阅额度或所有设备的用量。缺失日志和未完成扫描会导致统计不完整。")
-                    }
-                    .font(.caption).foregroundStyle(.secondary).padding(.top, 10)
-                }
-            }
-            .padding(30).frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .onAppear { if model.cost == nil { model.refreshCost() } }
-    }
-
-    private var localUsage: some View {
-        VStack(alignment: .leading, spacing: 17) {
-            HStack {
-                Text("本机每日 Token").font(.system(size: 15, weight: .semibold))
-                Spacer()
-                if model.costBusy { ProgressView().controlSize(.small) }
-                Text("每分钟更新").font(.caption).foregroundStyle(.secondary)
-            }
-            HStack(spacing: 30) {
-                statistic("今日已记录", value: model.today?.totalTokens)
-                statistic("近七天已记录", value: model.cost?.totals?.totalTokens)
-            }
-            if let days = model.cost?.daily, !days.isEmpty {
-                Chart(days.sorted { $0.date < $1.date }) { day in
-                    if let tokens = day.totalTokens {
-                        BarMark(x: .value("日期", String(day.date.suffix(5))), y: .value("Token", tokens))
-                            .foregroundStyle(Color.accentColor).cornerRadius(4)
-                            .accessibilityLabel("\(day.date)，\(tokens.formatted()) tokens")
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .leading) { value in
-                        AxisGridLine()
-                        AxisValueLabel {
-                            if let tokens = value.as(Double.self) {
-                                Text(tokens.formatted(.number.notation(.compactName).locale(Locale(identifier: "zh_CN"))))
-                            }
-                        }
-                    }
-                }
-                .frame(height: 130)
-                HStack(spacing: 18) {
-                    Text("今日输入 \(tokenString(model.today?.inputTokens))")
-                    Text("输出 \(tokenString(model.today?.outputTokens))")
-                    Text("缓存命中 \(tokenString(model.today?.cacheReadTokens))")
-                }
-                .font(.caption).foregroundStyle(.secondary)
-            } else if !model.costBusy { Text("尚无可展示的本地记录。未知值不会显示成零。")
-                .font(.callout).foregroundStyle(.secondary) }
-            if model.cost?.historyCoverageIsEstablished != true {
-                InlineMessage(text: "统计未完整覆盖所选日期，仅展示已读取的记录；后续扫描会继续补齐。", symbol: "info.circle", color: .orange)
-            }
-            if let error = model.costError { InlineMessage(text: "统计更新失败，旧数据可能已过时：\(error)", symbol: "exclamationmark.triangle", color: .red) }
-            if let date = model.cost?.updatedAt { Text("统计快照：\(displayDate(date)) · 本机日志，不是账单")
-                .font(.caption).foregroundStyle(.secondary) }
-        }
-    }
-
-    private var quota: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("官方账号额度").font(.system(size: 15, weight: .semibold))
-                Spacer()
-                if model.quotaBusy { ProgressView().controlSize(.small) }
-                Button(model.quota == nil ? "读取额度" : "刷新额度") { model.refreshQuota() }.disabled(model.quotaBusy)
-            }
-            if let usage = model.quota?.usage {
-                HStack {
-                    Text(usage.loginMethod ?? "Codex 已登录账号")
-                    Spacer()
-                    if let account = usage.redactedAccount { Text(account) }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                if let window = usage.primary { quotaWindow(window, fallback: "主额度窗口") }
-                if let window = usage.secondary { quotaWindow(window, fallback: "第二额度窗口") }
-                if let window = usage.tertiary { quotaWindow(window, fallback: "其他额度窗口") }
-                if usage.primary == nil { Text("官方未返回主窗口额度，不推算剩余百分比。")
-                    .font(.caption).foregroundStyle(.secondary) }
-                if let date = usage.updatedAt { Text("官方数据：\(displayDate(date))").font(.caption).foregroundStyle(.secondary) }
-            } else {
-                Text("点击读取，向官方 OpenAI 接口查询。此操作不运行模型、不消耗对话 Token。")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            if let error = model.quotaError { InlineMessage(text: "额度更新失败，旧快照不代表当前额度：\(error)", symbol: "exclamationmark.triangle", color: .red) }
-            Toggle("自动刷新官方额度（每 5 分钟）", isOn: $model.automaticQuota)
-                .font(.callout).onChange(of: model.automaticQuota) { _, enabled in if enabled { model.refreshQuota() } }
-        }
-    }
-
-    private func quotaWindow(_ window: CodexQuotaReport.Window, fallback: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(window.windowMinutes.map { $0 >= 1440 && $0 % 1440 == 0 ? "\($0 / 1440) 天窗口" : "\($0) 分钟窗口" } ?? fallback)
-                Spacer()
-                Text(window.remainingPercent.map { "剩余 \($0.formatted(.number.precision(.fractionLength(0...1))))%" } ?? "剩余额度未知").monospacedDigit()
-            }
-            .font(.callout)
-            if let remaining = window.remainingPercent { ProgressView(value: remaining, total: 100).tint(remaining < 15 ? .orange : .accentColor) }
-            if let date = window.resetsAt { Text("重置：\(displayDate(date))").font(.caption).foregroundStyle(.secondary) }
-        }
-    }
-
-    private func statistic(_ label: String, value: Int64?) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(tokenString(value)).font(.system(size: 25, weight: .semibold).monospacedDigit()).textSelection(.enabled)
-        }
-    }
-    private func tokenString(_ value: Int64?) -> String { value.map { $0.formatted() } ?? "待统计" }
-    private func displayDate(_ value: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: value) else { return value }
-        let display = DateFormatter()
-        display.locale = Locale(identifier: "zh_CN")
-        display.dateFormat = "M月d日 HH:mm"
-        return display.string(from: date)
     }
 }

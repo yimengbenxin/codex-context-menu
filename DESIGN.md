@@ -1,0 +1,5 @@
+# Native CodexBar visual system
+
+Visual authority is CodexBar 0.70.0's macOS menu and settings surfaces, not the superseded custom dashboard. Use native semantic colors/materials and SF system typography: body for quota headings, headline for provider names, footnote for update/reset/detail text. Menus use a 310 pt card with 20 pt horizontal padding, header line spacing 4, header/section spacing 6 and usage top padding 10. Progress tracks are 6 pt tall and pill-shaped; quota and pace rendering follows upstream. Values use tabular digits but no oversized metric tiles.
+
+The window uses the same compact provider card and native settings/list hierarchy. The default destination is context; usage appears through its dedicated menu entry and sidebar selection. Preserve every native-data detail through compact rows/disclosures. Errors, unavailable values, partial pricing and stale snapshots are explicit. The CodexBar MIT license and pinned-source provenance remain in the package. Never present this companion as the official CodexBar app or invent unused providers.

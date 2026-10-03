@@ -1,8 +1,17 @@
 import XCTest
 import AppKit
+import CodexTokenCore
 @testable import CodexTokenOverlayMac
 
 final class ContextFormTests: XCTestCase {
+    func testLocalCostCommandUsesHistoryOnlyFilesystemProfile() {
+        let resources = URL(fileURLWithPath: "/fixture/Resources")
+        let arguments = UsageBackend.costSandboxArguments(resources: resources)
+        XCTAssertTrue(arguments.contains("CODEX_HOME=" + CodexTokenCore.SessionPathResolver.resolveCodexHome()))
+        XCTAssertEqual(Array(arguments.suffix(2)), ["-f", "/fixture/Resources/usage/cost-history.sb"])
+        XCTAssertFalse(arguments.contains("-p"))
+    }
+
     @MainActor
     func testCompactionWarningAndModelSafetyLimit() throws {
         let raw = Data("""
@@ -109,6 +118,8 @@ final class ContextFormTests: XCTestCase {
         XCTAssertTrue(ContextActivationCopy.initial.contains("整个 Codex"))
         XCTAssertTrue(ContextActivationCopy.initial.contains("不是每个对话"))
         XCTAssertTrue(ContextActivationCopy.nextTurn.contains("下一轮"))
+        XCTAssertTrue(ContextActivationCopy.nextTurn.contains("恢复目标任务"))
+        XCTAssertTrue(ContextActivationCopy.nextTurn.contains("追加消息不算新一轮"))
         XCTAssertTrue(ContextActivationCopy.saved.contains("运行窗口确认实际生效"))
         XCTAssertFalse(ContextActivationCopy.saved.contains("已生效"))
     }

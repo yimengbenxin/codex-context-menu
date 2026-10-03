@@ -1,0 +1,98 @@
+{
+  "project": "https://github.com/steipete/CodexBar",
+  "version": "0.70.0",
+  "sourceTag": "v0.70.0",
+  "sourceTagObject": "8579a042971e71b182f70093680012ca8cc57198",
+  "sourceCommit": "fcaffd75ace3790cca3b768ae3fd3293281692ce",
+  "sourceURL": "https://github.com/steipete/CodexBar/tree/fcaffd75ace3790cca3b768ae3fd3293281692ce",
+  "license": "MIT",
+  "licenseFile": "macos/Resources/usage/LICENSE",
+  "licenseURL": "https://raw.githubusercontent.com/steipete/CodexBar/fcaffd75ace3790cca3b768ae3fd3293281692ce/LICENSE",
+  "licenseSha256": "14293556b79940745123d0160c71d27ed0e9fe9b8a848093f3ed78f4853caafe",
+  "integrationDecision": "REUSE upstream native rendering primitives; no data adapter, scheduler, model/tool loop or percentage-unit conversion",
+  "components": [
+    {
+      "destination": "macos/Sources/CodexTokenOverlayMac/CodexBarProgressView.swift",
+      "sources": [
+        {
+          "file": "Sources/CodexBar/UsageProgressBar.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBar/UsageProgressBar.swift",
+          "sha256": "9eab6b813e1d75f52b587a7d8a4bd9aa6e4de5463e977938e67948fa810bb7f5"
+        },
+        {
+          "file": "Sources/CodexBar/MenuHighlightStyle.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBar/MenuHighlightStyle.swift",
+          "sha256": "3d599b6ed166d2f359d063d65760ebcd408f691555ae177c12658f25bff63ca5"
+        }
+      ],
+      "retained": [
+        "Single static Canvas, rectangular clipping, 6-point pill track and rounded fill",
+        "Original 0...100 clamp and rounded-label edge treatment: below 0.5 percent empty, 99.5 percent and above full; interior values retain fractional precision",
+        "Original pace width, tip offset, display-scale pixel alignment, punch geometry and center stripe paths",
+        "Canvas destinationOut at opacity 0.9 followed by normal center stripe drawing; green on top, red deficit, white highlighted",
+        "Native selectedMenuItemTextColor and tertiaryLabelColor; track opacity 0.22; fallback tint when not highlighted",
+        "Native displayScale environment and caller-provided accessibility label"
+      ],
+      "removed": [
+        "Unused quota-warning and workday-boundary marker types, inputs, geometry, colors, normalization, collision resolution and accessibility descriptions",
+        "WorkdayTickAppearance dependency",
+        "Custom menuItemHighlighted environment dependency; replaced by explicit isHighlighted parameter",
+        "Localization L() call; percent accessibility value is explicit English text with original integer rounding",
+        "Unneeded MenuHighlightStyle text, error, accent, selection-background helpers and refresh-monitor environment",
+        "Upstream code comments; full MIT notice retained in existing LICENSE resource"
+      ],
+      "scope": "Pure SwiftUI drawing primitive. No CodexBarCore import, data ownership, refresh lifecycle, implicit animation, SwiftUI blendMode/compositingGroup modifier or GPU shader added.",
+      "paceGeometryNote": "The pinned upstream implementation draws vertical punch and center stripe paths, despite historical pace-stripe wording; retained exactly rather than inventing a diagonal marker.",
+      "interface": "CodexBarProgressView(percent: Double, tint: Color, accessibilityLabel: String, pacePercent: Double? = nil, paceOnTop: Bool = true, isHighlighted: Bool = false)",
+      "callerContract": "percent and pacePercent already use 0...100 units; nil pacePercent omits the pace marker. Caller owns width, tint and highlight state. The view fixes height at 6 points.",
+      "validation": "53 Swift tests passed, including native card sizing and missing-value tests. Packaged progress bar rendered in the real companion window; the native menu exposes the same card and navigation actions. No pixel-equality claim.",
+      "assertionStatus": "local-accepted"
+    },
+    {
+      "destination": [
+        "macos/Sources/CodexTokenOverlayMac/CodexBarUsageCard.swift",
+        "macos/Sources/CodexTokenOverlayMac/UsagePresentation.swift"
+      ],
+      "sources": [
+        {
+          "file": "Sources/CodexBar/UsageMenuCardLayout.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBar/UsageMenuCardLayout.swift",
+          "sha256": "159df1ef224b07cfa5f146ab2d63045fdaa04baff3735c75a4646a34bd903773"
+        },
+        {
+          "file": "Sources/CodexBar/UsageMenuCardHeaderAndUsageSectionView.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBar/UsageMenuCardHeaderAndUsageSectionView.swift",
+          "sha256": "d4278b58ad4109e09431e3341a3fd625107a0152036d8672e7890fa0bc5f3a6a"
+        },
+        {
+          "file": "Sources/CodexBar/MenuCardMetricRow.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBar/MenuCardMetricRow.swift",
+          "sha256": "2c3eacd3f2e1a32d4d661a8ad0c11ddd446982106cd286c69b7a475f9f1fbd9a"
+        },
+        {
+          "file": "Sources/CodexBar/ProviderAccentPalette.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBar/ProviderAccentPalette.swift",
+          "sha256": "78e3a3bfeea90b60f562069161b5c7ecfd24f13013782bc6fb619e63437f22b5"
+        },
+        {
+          "file": "Sources/CodexBarCore/UsageFormatter.swift",
+          "url": "https://github.com/steipete/CodexBar/blob/fcaffd75ace3790cca3b768ae3fd3293281692ce/Sources/CodexBarCore/UsageFormatter.swift",
+          "sha256": "0303055853cbc6be75124b8c841e4781a6fd4b48fb1c8a096e31c889f37bdb62"
+        }
+      ],
+      "retained": [
+        "310 pt native card, 20 pt horizontal insets, 4/6/10/12 pt spacings, body/headline/footnote typography",
+        "ViewThatFits horizontal-to-vertical metric header; six-point pill and pace Canvas; Codex RGB 73/163/176",
+        "Compact token promotion thresholds and precision; reset countdown rounding; relative update display"
+      ],
+      "differences": [
+        "Chinese copy and masked email, only the Codex provider",
+        "Existing context-first sidebar and conversation controls, additional local request/token/cache detail pages",
+        "Explicit unknown/error/partial-history labels; no browser dashboard, cookie access or fake provider buttons"
+      ],
+      "scope": "Bounded immutable presentation binds existing UsageModel snapshots. No data parsing, pricing, OAuth, scheduler or configuration ownership added.",
+      "validation": "Native window quota card, history table/chart, projects and menu navigation inspected. Original full-app pixel equality is not asserted.",
+      "assertionStatus": "local-accepted"
+    }
+  ]
+}

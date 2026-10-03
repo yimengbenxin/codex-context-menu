@@ -63,7 +63,8 @@ def revision(raw):
 
 
 def status(root):
-    root = Path(root).resolve(strict=True)
+    selected_root = Path(os.path.abspath(root))
+    root = selected_root.resolve(strict=True)
     if not root.is_dir() or root == Path.home() / ".codex":
         raise ValueError("请选择有效的项目目录，不能选择全局 Codex 配置目录。")
     directory = root / ".codex"
@@ -89,8 +90,10 @@ def status(root):
             inherited.append({"path": str(candidate), "values": overrides})
     projects = global_document.get("projects", {})
     trusted = False
-    for candidate in [root, *root.parents]:
-        entries = [entry for project, entry in projects.items() if Path(project).resolve() == candidate]
+    selected_ancestors = [selected_root, *selected_root.parents]
+    for depth, candidate in enumerate([root, *root.parents]):
+        aliases = [candidate] + selected_ancestors[depth:depth + 1]
+        entries = [entry for project, entry in projects.items() if Path(os.path.abspath(project)) in aliases]
         if entries:
             trusted = entries[0].get("trust_level") == "trusted"
             break
