@@ -6,7 +6,6 @@ import tempfile
 import sqlite3
 import sys
 import hashlib
-from aiohttp import web, WSMsgType
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
@@ -484,4 +483,5 @@ trust_level = "trusted"
 
 
 if __name__ == "__main__":
+    from aiohttp import web, WSMsgType
     raise SystemExit(0 if asyncio.run(run()) else 1)
